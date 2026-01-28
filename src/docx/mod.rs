@@ -1,3 +1,4 @@
+pub mod image_utils;
 mod builder;
 pub mod ooxml;
 mod packager;

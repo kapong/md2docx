@@ -4,6 +4,7 @@
 //! document structure, converting markdown elements to DOCX paragraphs
 //! and runs.
 
+use crate::docx::image_utils::{default_image_size_emu, read_image_dimensions};
 use crate::docx::ooxml::{
     DocElement, DocumentXml, FooterConfig, FooterXml, FootnotesXml, HeaderConfig, HeaderFooterRefs,
     HeaderXml, ImageElement, Paragraph, ParagraphChild, Run, Table, TableCellElement, TableRow,
@@ -125,14 +126,21 @@ impl ImageContext {
     /// For now, we assign a placeholder rel_id. The actual ID will be
     /// assigned during packaging when relationships are finalized.
     pub fn add_image(&mut self, src: &str, width: Option<&str>) -> String {
-        // Generate unique ID (offset by 5 since rId1-5 are used for styles/settings/fonts/webSettings/theme)
-        // This ensures the first image gets rId6
-        let rel_id = format!("rId{}", self.next_id + 5);
+        // Generate unique ID (offset by 3 since rId1-3 are used for styles, settings, fontTable)
+        // This ensures the first image gets rId4
+        let rel_id = format!("rId{}", self.next_id + 3);
         let filename = self.generate_filename(src);
 
-        // Default size: 6 inches wide, calculate height to maintain aspect
-        // For now, use fixed size; actual image loading would read dimensions
-        let (width_emu, height_emu) = self.parse_dimensions(width);
+        // Try to read actual dimensions
+        let mut actual_dims = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Ok(data) = std::fs::read(src) {
+                actual_dims = read_image_dimensions(&data);
+            }
+        }
+
+        let (width_emu, height_emu) = self.parse_dimensions(width, actual_dims);
 
         self.images.push(ImageInfo {
             filename: filename.clone(),
@@ -149,11 +157,15 @@ impl ImageContext {
 
     /// Add a mermaid diagram SVG and return its relationship ID
     pub fn add_mermaid_svg(&mut self, filename: &str, data: Vec<u8>) -> String {
-        let rel_id = format!("rId{}", self.next_id + 5);
+        let rel_id = format!("rId{}", self.next_id + 3);
 
-        // Default size: 6 inches wide, height calculated for default aspect
-        let width_emu = 6 * 914400;
-        let height_emu = 4 * 914400;
+        // Read SVG dimensions and calculate proper size
+        let (width_emu, height_emu) = if let Some(dims) = read_image_dimensions(&data) {
+            default_image_size_emu(dims)
+        } else {
+            // Fallback to 6x4 inches
+            (6 * 914400, 4 * 914400)
+        };
 
         self.images.push(ImageInfo {
             filename: filename.to_string(),
@@ -180,17 +192,23 @@ impl ImageContext {
     }
 
     /// Parse width specification into EMUs
-    fn parse_dimensions(&self, width: Option<&str>) -> (i64, i64) {
+    fn parse_dimensions(
+        &self,
+        width: Option<&str>,
+        actual_dims: Option<crate::docx::image_utils::ImageDimensions>,
+    ) -> (i64, i64) {
         const EMU_PER_INCH: i64 = 914400;
         const DEFAULT_WIDTH_INCHES: f64 = 6.0;
-        const DEFAULT_HEIGHT_INCHES: f64 = 4.0;
+
+        // Use actual aspect ratio if available, otherwise default to 3:2
+        let inv_aspect = actual_dims.map(|d| 1.0 / d.aspect_ratio()).unwrap_or(0.67);
 
         if let Some(w) = width {
             if w.ends_with('%') {
-                // Percentage of page width (~6.5 inches for A4 with margins)
+                // Percentage of page width (~6.0 inches for A4 with margins)
                 let pct: f64 = w.trim_end_matches('%').parse().unwrap_or(100.0);
-                let width_inches = 6.5 * (pct / 100.0);
-                let height_inches = width_inches * 0.67; // Assume 3:2 aspect ratio
+                let width_inches = 6.0 * (pct / 100.0);
+                let height_inches = width_inches * inv_aspect;
                 (
                     (width_inches * EMU_PER_INCH as f64) as i64,
                     (height_inches * EMU_PER_INCH as f64) as i64,
@@ -200,7 +218,7 @@ impl ImageContext {
                     .trim_end_matches("in")
                     .parse()
                     .unwrap_or(DEFAULT_WIDTH_INCHES);
-                let height_inches = width_inches * 0.67;
+                let height_inches = width_inches * inv_aspect;
                 (
                     (width_inches * EMU_PER_INCH as f64) as i64,
                     (height_inches * EMU_PER_INCH as f64) as i64,
@@ -209,17 +227,21 @@ impl ImageContext {
                 // Pixels (assume 96 DPI)
                 let val_str = w.trim_end_matches("px");
                 let px: f64 = val_str.parse().unwrap_or(576.0);
-                let width_inches = px / 96.0;
-                let height_inches = width_inches * 0.67;
+                let width_inches = (px / 96.0).min(6.0); // Constrain to 6 inches max
+                let height_inches = width_inches * inv_aspect;
                 (
                     (width_inches * EMU_PER_INCH as f64) as i64,
                     (height_inches * EMU_PER_INCH as f64) as i64,
                 )
             }
+        } else if let Some(dims) = actual_dims {
+            // Use standard calculation based on actual dimensions
+            default_image_size_emu(dims)
         } else {
+            // Fallback to 6x4 inches
             (
                 (DEFAULT_WIDTH_INCHES * EMU_PER_INCH as f64) as i64,
-                (DEFAULT_HEIGHT_INCHES * EMU_PER_INCH as f64) as i64,
+                (4.0 * EMU_PER_INCH as f64) as i64,
             )
         }
     }
@@ -630,9 +652,13 @@ fn block_to_elements(
                     // Add to image context
                     let rel_id = ctx.image_ctx.add_mermaid_svg(&filename, svg.into_bytes());
 
-                    // Get dimensions (default for now)
-                    let width_emu = 6 * 914400;
-                    let height_emu = 4 * 914400;
+                    // Get dimensions from context (last added image)
+                    let (width_emu, height_emu) = ctx
+                        .image_ctx
+                        .images
+                        .last()
+                        .map(|img| (img.width_emu, img.height_emu))
+                        .unwrap_or((6 * 914400, 4 * 914400));
 
                     let img = ImageElement::new(&rel_id, width_emu, height_emu)
                         .alt_text("Mermaid Diagram")
@@ -2442,8 +2468,8 @@ End of document.
     fn test_image_context_dimensions_percentage() {
         let mut ctx = ImageContext::new();
         ctx.add_image("test.png", Some("50%"));
-        // 50% of 6.5in = 3.25in = 2971800 EMUs
-        assert_eq!(ctx.images[0].width_emu, 2971800);
+        // 50% of 6.0in = 3.0in = 2743200 EMUs
+        assert_eq!(ctx.images[0].width_emu, 2743200);
     }
 
     #[test]
@@ -2488,9 +2514,9 @@ End of document.
         let img = &result.images.images[0];
         assert_eq!(img.src, "image.png");
 
-        // Width should be 50% of 6.5 inches = 3.25 inches
-        // 3.25 * 914400 EMUs/inch = 2971800 EMUs
-        assert_eq!(img.width_emu, 2971800);
+        // Width should be 50% of 6.0 inches = 3.0 inches
+        // 3.0 * 914400 EMUs/inch = 2743200 EMUs
+        assert_eq!(img.width_emu, 2743200);
     }
 
     #[test]

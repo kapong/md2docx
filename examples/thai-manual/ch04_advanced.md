@@ -454,7 +454,7 @@ md2docx รองรับการแปลง Mermaid diagrams เป็นร
 
 #### Flowchart
 
-```markdown
+````markdown
 ```mermaid
 flowchart TD
     A[เริ่มต้น] --> B{ตรวจสอบ}
@@ -463,11 +463,20 @@ flowchart TD
     C --> E[สิ้นสุด]
     D --> E
 ```
+````
+
+```mermaid
+flowchart TD
+    A[เริ่มต้น] --> B{ตรวจสอบ}
+    B -->|ผ่าน| C[ดำเนินการ]
+    B -->|ไม่ผ่าน| D[แจ้งเตือน]
+    C --> E[สิ้นสุด]
+    D --> E
 ```
 
 #### Sequence Diagram
 
-```markdown
+````markdown
 ```mermaid
 sequenceDiagram
     participant User
@@ -479,11 +488,23 @@ sequenceDiagram
     DB-->>App: ส่งผลลัพธ์
     App-->>User: แสดงผล
 ```
+````
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App
+    participant DB
+    
+    User->>App: ส่งคำขอ
+    App->>DB: ตรวจสอบข้อมูล
+    DB-->>App: ส่งผลลัพธ์
+    App-->>User: แสดงผล
 ```
 
 #### Class Diagram
 
-```markdown
+````markdown
 ```mermaid
 classDiagram
     class Animal {
@@ -495,6 +516,19 @@ classDiagram
     }
     Animal <|-- Dog
 ```
+````
+
+
+```mermaid
+classDiagram
+    class Animal {
+        +String name
+        +makeSound()
+    }
+    class Dog {
+        +fetch()
+    }
+    Animal <|-- Dog
 ```
 
 ### คุณสมบัติพิเศษ

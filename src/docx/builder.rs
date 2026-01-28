@@ -672,24 +672,24 @@ fn block_to_elements(
         }
 
         Block::Mermaid { content, id } => {
-            match crate::mermaid::render_to_png(content, 2.0) {
-                // 2x scale for high quality
-                Ok(png_data) => {
+            match crate::mermaid::render_to_svg(content) {
+                Ok(svg_data) => {
                     // Register figure anchor if id is present
                     if let Some(fig_id) = id {
                         ctx.xref_ctx.register_figure(fig_id, "Mermaid Diagram");
                     }
 
                     // Generate a virtual filename
-                    let filename = format!("mermaid{}.png", ctx.image_id);
+                    let filename = format!("mermaid{}.svg", ctx.image_id);
 
-                    // Add to image context as PNG
+                    // Add to image context as SVG
                     let rel_id = ctx.image_ctx.add_image_data(
-                        &filename, png_data,
+                        &filename,
+                        svg_data.into_bytes(),
                         None, // No explicit width, let it use natural size
                     );
 
-                    // Get dimensions from the PNG data
+                    // Get dimensions from the SVG data
                     let (width_emu, height_emu) = ctx
                         .image_ctx
                         .images

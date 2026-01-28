@@ -1,0 +1,23 @@
+mod content_types;
+mod doc_props;
+mod document;
+mod endnotes;
+mod footer;
+mod footnotes;
+mod header;
+mod latent_styles;
+mod numbering;
+mod rels;
+mod styles;
+
+pub use content_types::*;
+pub use doc_props::*;
+pub use document::*;
+pub use endnotes::*;
+pub use footer::*;
+pub use footnotes::*;
+pub use header::*;
+pub use latent_styles::*;
+pub use numbering::*;
+pub use rels::*;
+pub use styles::*;

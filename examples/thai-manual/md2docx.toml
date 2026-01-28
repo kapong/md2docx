@@ -1,0 +1,48 @@
+[document]
+title = "คู่มือการใช้งาน md2docx"
+subtitle = "แปลง Markdown เป็น DOCX อย่างมืออาชีพ"
+author = "ทีมพัฒนา md2docx"
+date = "auto"
+language = "th"
+
+[template]
+file = "custom-reference.docx"
+
+[output]
+file = "output/คู่มือ-md2docx.docx"
+
+[toc]
+enabled = true
+depth = 2
+title = "สารบัญ"
+
+[page_numbers]
+enabled = true
+skip_cover = true
+skip_chapter_first = true
+
+[fonts]
+default = "TH Sarabun New"
+code = "Consolas"
+
+[code]
+theme = "light"
+show_filename = true
+show_line_numbers = false
+
+[images]
+max_width = "100%"
+auto_caption = true
+
+# Header configuration
+[header]
+left = "{title}"
+center = ""
+right = "{chapter}"
+skip_cover = true
+
+# Footer configuration
+[footer]
+left = ""
+center = "{page}"
+right = ""

@@ -1,0 +1,8 @@
+# Thai locale for md2docx
+
+[labels]
+toc_title = "สารบัญ"
+figure_prefix = "รูปที่"
+table_prefix = "ตารางที่"
+appendix_prefix = "ภาคผนวก"
+page_label = "หน้า"

@@ -1,0 +1,8 @@
+# English locale for md2docx
+
+[labels]
+toc_title = "Table of Contents"
+figure_prefix = "Figure"
+table_prefix = "Table"
+appendix_prefix = "Appendix"
+page_label = "Page"

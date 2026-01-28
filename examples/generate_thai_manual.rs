@@ -128,17 +128,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let docx_bytes = markdown_to_docx_with_config(&combined_markdown, lang, &doc_config)?;
 
     // Save to file
-    let output_path = output_dir.join("คู่มือ-md2docx.docx");
+    let output_path = output_dir.join("manual-md2docx.docx");
     fs::write(&output_path, &docx_bytes)?;
 
     println!("✅ สร้างเสร็จแล้ว!");
     println!("📄 ไฟล์: {:?}", output_path);
     println!("📊 ขนาด: {} KB", docx_bytes.len() / 1024);
-
-    // Also create English filename for compatibility
-    let output_path_en = output_dir.join("md2docx-manual-th.docx");
-    fs::write(&output_path_en, &docx_bytes)?;
-    println!("📄 ไฟล์ (EN): {:?}", output_path_en);
 
     Ok(())
 }

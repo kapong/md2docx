@@ -49,6 +49,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         current_block = Some(BlockBuilder::Heading {
                             level: level as u8,
@@ -62,6 +64,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         current_block = Some(BlockBuilder::Paragraph(Vec::new()));
                         current_inlines = Vec::new();
@@ -71,6 +75,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         block_stack.push(BlockBuilder::BlockQuote(Vec::new()));
                     }
@@ -79,6 +85,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         let ordered = start_number.is_some();
                         list_stack.push(ListBuilder {
@@ -108,6 +116,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         let info = match kind {
                             pulldown_cmark::CodeBlockKind::Fenced(info) => info.to_string(),
@@ -128,6 +138,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         table_builder = Some(TableBuilder {
                             alignments: alignment
@@ -165,6 +177,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         footnote_builder = Some(FootnoteBuilder {
                             name: name.to_string(),
@@ -267,40 +281,64 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                                 };
 
                                 if let Inline::Image { alt, src, title } = image {
-                                    blocks.push(Block::Image {
-                                        alt,
-                                        src,
-                                        title,
-                                        width,
-                                        id: None,
-                                    });
+                                    add_block_to_correct_stack(
+                                        &mut blocks,
+                                        &mut footnote_builder,
+                                        &mut list_stack,
+                                        &mut block_stack,
+                                        Block::Image {
+                                            alt,
+                                            src,
+                                            title,
+                                            width,
+                                            id: None,
+                                        },
+                                    );
                                     current_inlines = Vec::new();
                                     continue;
                                 }
                             }
-                            blocks.push(Block::Paragraph(current_inlines.clone()));
+                            add_block_to_correct_stack(
+                                &mut blocks,
+                                &mut footnote_builder,
+                                &mut list_stack,
+                                &mut block_stack,
+                                Block::Paragraph(current_inlines.clone()),
+                            );
                         }
                         current_inlines = Vec::new();
                     }
                     TagEnd::BlockQuote(_) => {
                         if let Some(BlockBuilder::BlockQuote(content)) = block_stack.pop() {
-                            blocks.push(Block::BlockQuote(content));
+                            add_block_to_correct_stack(
+                                &mut blocks,
+                                &mut footnote_builder,
+                                &mut list_stack,
+                                &mut block_stack,
+                                Block::BlockQuote(content),
+                            );
                         }
                     }
                     TagEnd::List(_) => {
                         if let Some(list) = list_stack.pop() {
-                            blocks.push(Block::List {
-                                ordered: list.ordered,
-                                start: list.start,
-                                items: list
-                                    .items
-                                    .into_iter()
-                                    .map(|item| ListItem {
-                                        content: item.content,
-                                        checked: item.checked,
-                                    })
-                                    .collect(),
-                            });
+                            add_block_to_correct_stack(
+                                &mut blocks,
+                                &mut footnote_builder,
+                                &mut list_stack,
+                                &mut block_stack,
+                                Block::List {
+                                    ordered: list.ordered,
+                                    start: list.start,
+                                    items: list
+                                        .items
+                                        .into_iter()
+                                        .map(|item| ListItem {
+                                            content: item.content,
+                                            checked: item.checked,
+                                        })
+                                        .collect(),
+                                },
+                            );
                         }
                     }
                     TagEnd::Item => {
@@ -324,26 +362,39 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             show_line_numbers,
                         }) = current_block.take()
                         {
-                            if lang.as_deref() == Some("mermaid") {
-                                blocks.push(Block::Mermaid { content, id: None });
+                            let block = if lang.as_deref() == Some("mermaid") {
+                                Block::Mermaid { content, id: None }
                             } else {
-                                blocks.push(Block::CodeBlock {
+                                Block::CodeBlock {
                                     lang,
                                     content,
                                     filename,
                                     highlight_lines,
                                     show_line_numbers,
-                                });
-                            }
+                                }
+                            };
+                            add_block_to_correct_stack(
+                                &mut blocks,
+                                &mut footnote_builder,
+                                &mut list_stack,
+                                &mut block_stack,
+                                block,
+                            );
                         }
                     }
                     TagEnd::Table => {
                         if let Some(table) = table_builder.take() {
-                            blocks.push(Block::Table {
-                                headers: table.headers,
-                                alignments: table.alignments,
-                                rows: table.rows,
-                            });
+                            add_block_to_correct_stack(
+                                &mut blocks,
+                                &mut footnote_builder,
+                                &mut list_stack,
+                                &mut block_stack,
+                                Block::Table {
+                                    headers: table.headers,
+                                    alignments: table.alignments,
+                                    rows: table.rows,
+                                },
+                            );
                         }
                     }
                     TagEnd::TableHead => {
@@ -421,6 +472,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut current_block,
                             &mut blocks,
                             &mut footnote_builder,
+                            &mut list_stack,
+                            &mut block_stack,
                         );
                         if let Some(builder) = footnote_builder.take() {
                             footnotes.insert(builder.name, builder.content);
@@ -570,16 +623,32 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     &mut current_block,
                     &mut blocks,
                     &mut footnote_builder,
+                    &mut list_stack,
+                    &mut block_stack,
                 );
-                blocks.push(Block::ThematicBreak);
+                add_block_to_correct_stack(
+                    &mut blocks,
+                    &mut footnote_builder,
+                    &mut list_stack,
+                    &mut block_stack,
+                    Block::ThematicBreak,
+                );
             }
             Event::Html(html) => {
                 finish_current_block_with_footnote(
                     &mut current_block,
                     &mut blocks,
                     &mut footnote_builder,
+                    &mut list_stack,
+                    &mut block_stack,
                 );
-                blocks.push(Block::Html(html.to_string()));
+                add_block_to_correct_stack(
+                    &mut blocks,
+                    &mut footnote_builder,
+                    &mut list_stack,
+                    &mut block_stack,
+                    Block::Html(html.to_string()),
+                );
             }
             Event::FootnoteReference(name) => {
                 let name = name.to_string();
@@ -614,7 +683,13 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
     }
 
     // Don't forget the last block
-    finish_current_block_with_footnote(&mut current_block, &mut blocks, &mut footnote_builder);
+    finish_current_block_with_footnote(
+        &mut current_block,
+        &mut blocks,
+        &mut footnote_builder,
+        &mut list_stack,
+        &mut block_stack,
+    );
 
     // Process cross-references
     let blocks = process_blocks_for_cross_refs(blocks);
@@ -642,13 +717,35 @@ fn finish_current_block_with_footnote(
     current_block: &mut Option<BlockBuilder>,
     blocks: &mut Vec<Block>,
     footnote_builder: &mut Option<FootnoteBuilder>,
+    list_stack: &mut Vec<ListBuilder>,
+    block_stack: &mut Vec<BlockBuilder>,
 ) {
-    if let Some(block) = current_block.take() {
-        if let Some(builder) = footnote_builder {
-            builder.content.push(block.build());
+    if let Some(builder) = current_block.take() {
+        let block = builder.build();
+        add_block_to_correct_stack(blocks, footnote_builder, list_stack, block_stack, block);
+    }
+}
+
+/// Add a block to the correct stack (footnote, list, blockquote, or top-level)
+fn add_block_to_correct_stack(
+    blocks: &mut Vec<Block>,
+    footnote_builder: &mut Option<FootnoteBuilder>,
+    list_stack: &mut Vec<ListBuilder>,
+    block_stack: &mut Vec<BlockBuilder>,
+    block: Block,
+) {
+    if let Some(builder) = footnote_builder {
+        builder.content.push(block);
+    } else if let Some(list) = list_stack.last_mut() {
+        if let Some(item) = list.items.last_mut() {
+            item.content.push(block);
         } else {
-            blocks.push(block.build());
+            blocks.push(block);
         }
+    } else if let Some(BlockBuilder::BlockQuote(content)) = block_stack.last_mut() {
+        content.push(block);
+    } else {
+        blocks.push(block);
     }
 }
 

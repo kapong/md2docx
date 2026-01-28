@@ -11,11 +11,16 @@ use crate::error::Error;
 /// Padding factor for SVG canvas (1.15 = 15% extra space)
 const SVG_PADDING_FACTOR: f64 = 1.15;
 
+use std::panic;
+
 /// Render mermaid diagram to SVG string with text converted to paths
 ///
 /// This ensures the SVG renders correctly in Microsoft Word, which has
 /// limited font support for embedded SVGs. By converting text to paths,
 /// the text becomes vector shapes that Word can always render.
+///
+/// If the diagram contains unsupported features (like edge labels with Thai text),
+/// it will attempt to simplify the diagram and render a basic version.
 ///
 /// # Arguments
 /// * `content` - The mermaid diagram source code
@@ -24,10 +29,53 @@ const SVG_PADDING_FACTOR: f64 = 1.15;
 /// SVG string with text converted to paths and proper canvas sizing
 ///
 /// # Errors
-/// Returns Error if rendering fails
+/// Returns Error if rendering fails even after fallback
 pub fn render_to_svg(content: &str) -> Result<String, Error> {
-    // First render to SVG using mermaid-rs-renderer
-    let svg = mermaid_rs_renderer::render(content).map_err(|e| Error::Mermaid(e.to_string()))?;
+    // Check for problematic Unicode (Thai, etc.) upfront
+    // The mermaid-rs-renderer library has a bug with Unicode string indexing
+    // that causes panics with Thai text. Skip rendering entirely if found.
+    if contains_problematic_unicode(content) {
+        return Err(Error::Mermaid(
+            "Mermaid renderer does not support Thai/Unicode text. \
+             The diagram will be shown as code instead. \
+             Consider using English text or the external mmdc CLI."
+                .to_string(),
+        ));
+    }
+
+    // Try normal rendering first
+    match try_render_to_svg(content) {
+        Ok(svg) => Ok(svg),
+        Err(e) => {
+            // If normal rendering fails, try stripping edge labels
+            let simplified = strip_edge_labels(content);
+            if simplified != content {
+                eprintln!("Warning: Mermaid diagram contains unsupported features (edge labels). Rendering simplified version without labels.");
+                try_render_to_svg(&simplified)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Attempt to render mermaid diagram to SVG
+///
+/// Wraps the actual renderer in catch_unwind to prevent panics.
+fn try_render_to_svg(content: &str) -> Result<String, Error> {
+    // Wrap in catch_unwind to prevent panics in the renderer from crashing the tool
+    let content_owned = content.to_string();
+    let result = panic::catch_unwind(move || mermaid_rs_renderer::render(&content_owned));
+
+    let svg = match result {
+        Ok(Ok(svg)) => svg,
+        Ok(Err(e)) => return Err(Error::Mermaid(e.to_string())),
+        Err(_) => {
+            return Err(Error::Mermaid(
+                "Mermaid renderer panicked (likely due to Unicode or syntax issues)".to_string(),
+            ))
+        }
+    };
 
     // Convert text to paths for Word compatibility
     #[cfg(feature = "mermaid-png")]
@@ -37,6 +85,48 @@ pub fn render_to_svg(content: &str) -> Result<String, Error> {
     let svg = add_canvas_padding(&svg)?;
 
     Ok(svg)
+}
+
+/// Strip edge labels from mermaid diagram for compatibility
+///
+/// Converts edge labels like `A -->|label| B` to simple arrows `A --> B`.
+/// This is a fallback when the mermaid renderer doesn't support certain features
+/// like edge labels with Unicode/Thai text.
+///
+/// # Patterns handled
+/// - `-->|label|` - solid arrow with label
+/// - `--|label|->` - dashed arrow with label
+/// - `==>|label|` - thick arrow with label
+/// - `-->[label]` - bracketed label (with or without space)
+///
+/// # Returns
+/// Simplified mermaid code without edge labels
+fn strip_edge_labels(content: &str) -> String {
+    use regex::Regex;
+
+    // Pattern 1: Pipe-separated labels: -->|label| or --|label|->, etc.
+    let pipe_label_re = Regex::new(r#"(-{1,2}?=?>?|->?|\.-\.)\|[^|]+\|"#).unwrap();
+
+    // Pattern 2: Bracket labels: -->[label] or --> [label]
+    // The \s* matches optional space between arrow and bracket
+    let bracket_label_re = Regex::new(r#"(-{1,2}?=?>?|->?)\s*\[([^\]]+)\]"#).unwrap();
+
+    // Replace pipe labels with simple arrow
+    let result = pipe_label_re.replace_all(content, "$1");
+
+    // Replace bracket labels with simple arrow
+    let result = bracket_label_re.replace_all(&result, "$1");
+
+    result.to_string()
+}
+
+/// Check if content contains Thai or other problematic Unicode characters
+/// that may cause mermaid-rs-renderer to panic
+fn contains_problematic_unicode(content: &str) -> bool {
+    // Thai range: U+0E00-U+0E7F
+    content
+        .chars()
+        .any(|c| ('\u{0E00}'..='\u{0E7F}').contains(&c))
 }
 
 /// Convert SVG text elements to path elements using usvg
@@ -268,5 +358,88 @@ mod tests {
         // Should preserve px units
         assert!(result.contains(r#"width="115.00px""#));
         assert!(result.contains(r#"height="57.50px""#));
+    }
+
+    #[test]
+    fn test_strip_edge_labels_pipe_format() {
+        let input = "A -->|label| B";
+        let output = strip_edge_labels(input);
+        assert_eq!(output, "A --> B");
+    }
+
+    #[test]
+    fn test_strip_edge_labels_multiple_pipe_labels() {
+        let input = "A -->|x| B -->|y| C";
+        let output = strip_edge_labels(input);
+        assert_eq!(output, "A --> B --> C");
+    }
+
+    #[test]
+    fn test_strip_edge_labels_bracket_format() {
+        let input = "A --> [label] B";
+        let output = strip_edge_labels(input);
+        assert_eq!(output, "A --> B");
+    }
+
+    #[test]
+    fn test_strip_edge_labels_bracket_format_no_space() {
+        let input = "A -->[label] B";
+        let output = strip_edge_labels(input);
+        assert_eq!(output, "A --> B");
+    }
+
+    #[test]
+    fn test_strip_edge_labels_mixed_formats() {
+        let input = "A -->|pipe| B --> [bracket] C";
+        let output = strip_edge_labels(input);
+        assert_eq!(output, "A --> B --> C");
+    }
+
+    #[test]
+    fn test_strip_edge_labels_complex_diagram() {
+        let input = "flowchart TB
+    subgraph Input
+        MD[Markdown]
+    end
+    subgraph Output
+        DOCX[DOCX]
+    end
+    MD -->|Process| DOCX";
+
+        let output = strip_edge_labels(input);
+        assert!(output.contains("MD --> DOCX"));
+        assert!(!output.contains("|Process|"));
+    }
+
+    #[test]
+    fn test_contains_problematic_unicode_thai() {
+        assert!(contains_problematic_unicode("A[เริ่มต้น]"));
+        assert!(contains_problematic_unicode("Hello สวัสดี"));
+        assert!(!contains_problematic_unicode("Hello World"));
+    }
+
+    #[test]
+    fn test_render_with_edge_labels_english() {
+        // This diagram has edge labels but should render after stripping them
+        let diagram = "flowchart LR
+    Start -->|Pass| Success
+    Start -->|Fail| Error";
+
+        let result = render_to_svg(diagram);
+        assert!(result.is_ok(), "Should render after stripping edge labels");
+        let svg = result.unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn test_render_thai_text_fails_gracefully() {
+        let diagram = "flowchart LR
+    A[เริ่มต้น] --> B[จบ]";
+
+        let result = render_to_svg(diagram);
+        assert!(result.is_err());
+        // Should provide helpful error message
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Thai/Unicode") || error_msg.contains("Unicode"));
     }
 }

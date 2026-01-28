@@ -456,22 +456,17 @@ md2docx รองรับการแปลง Mermaid diagrams เป็นร
 
 ````markdown
 ```mermaid
-flowchart TD
-    A[เริ่มต้น] --> B{ตรวจสอบ}
-    B -->|ผ่าน| C[ดำเนินการ]
-    B -->|ไม่ผ่าน| D[แจ้งเตือน]
-    C --> E[สิ้นสุด]
-    D --> E
+flowchart LR
+    A[Start] --> B[Process]
+    B --> C[End]
 ```
 ````
 
+
 ```mermaid
-flowchart TD
-    A[เริ่มต้น] --> B{ตรวจสอบ}
-    B -->|ผ่าน| C[ดำเนินการ]
-    B -->|ไม่ผ่าน| D[แจ้งเตือน]
-    C --> E[สิ้นสุด]
-    D --> E
+flowchart LR
+    A[Start] --> B[Process]
+    B --> C[End]
 ```
 
 #### Sequence Diagram
@@ -483,10 +478,10 @@ sequenceDiagram
     participant App
     participant DB
     
-    User->>App: ส่งคำขอ
-    App->>DB: ตรวจสอบข้อมูล
-    DB-->>App: ส่งผลลัพธ์
-    App-->>User: แสดงผล
+    User->>App: Send Request
+    App->>DB: Query Data
+    DB-->>App: Return Results
+    App-->>User: Display
 ```
 ````
 
@@ -496,10 +491,10 @@ sequenceDiagram
     participant App
     participant DB
     
-    User->>App: ส่งคำขอ
-    App->>DB: ตรวจสอบข้อมูล
-    DB-->>App: ส่งผลลัพธ์
-    App-->>User: แสดงผล
+    User->>App: Send Request
+    App->>DB: Query Data
+    DB-->>App: Return Results
+    App-->>User: Display
 ```
 
 #### Class Diagram
@@ -537,6 +532,22 @@ classDiagram
 - **ไม่ต้องติดตั้งเพิ่ม** - ไม่ต้องใช้ Browser หรือ Node.js
 - **เร็ว** - เร็วกว่า mermaid-cli 500-1000 เท่า
 - **แสดงผลถูกต้อง** - ลูกศรและข้อความแสดงครบถ้วน
+
+### ข้อจำกัด
+
+**ภาษาไทยใน Diagrams:**
+เนื่องจากข้อจำกัดของไลบรารี mermaid-rs-renderer ในขณะนี้ระบบยังไม่รองรับการแสดงผลภาษาไทยใน Mermaid diagrams หากต้องการใช้ภาษาไทย แนะนำให้:
+
+1. ใช้ภาษาอังกฤษแทนใน diagrams (แนะนำ)
+2. ใช้เครื่องมือ mermaid-cli (mmdc) ภายนอกซึ่งรองรับภาษาไทย
+
+```bash
+# ติดตั้ง mermaid-cli
+npm install -g @mermaid-js/mermaid-cli
+
+# ใช้งาน
+mmdc -i diagram.mmd -o diagram.png
+```
 
 ### ข้อควรระวัง
 

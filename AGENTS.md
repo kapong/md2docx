@@ -833,13 +833,6 @@ const docxBytes = diff_documents(oldMd, newMd, { mode: 'inline' });
 - [ ] 18. Bibliography/citations
 - [ ] 19. Index generation
 
-### Phase 5: Git Diff ❌ NOT STARTED
-- [ ] 21. Git integration (gix) - **STUB ONLY** (`src/diff/mod.rs` = 2 lines)
-- [ ] 22. Diff algorithm for markdown
-- [ ] 23. Track Changes OOXML generation
-- [ ] 24. Inline diff styling
-- [ ] 25. Diff CLI commands
-
 ### Phase 6: WASM & Polish ⚠️ PARTIAL
 - [ ] 26. WASM bindings
 - [ ] 27. Browser API
@@ -859,12 +852,10 @@ const docxBytes = diff_documents(oldMd, newMd, { mode: 'inline' });
 | `build` | ✅ Works | Single file (`-i`) and directory (`-d`) modes |
 | `dump-template` | ✅ Works | Generates template DOCX with all styles |
 | `validate-template` | ✅ Works | Checks for required/recommended styles |
-| `diff` | ❌ Missing | Not in CLI yet |
 
 ### Priority Next Steps
 1. **Bibliography/Citations** - Parse `[@cite]` syntax
 2. **Index Generation** - Auto-generate from `{index:term}` markers
-3. **Git Diff** - Implement diff module with Track Changes
 4. **WASM Bindings** - Browser API for web use
 5. **Watch Mode** - Auto-rebuild on file changes
 
@@ -984,14 +975,6 @@ docx.write_to("output.docx")?;
 let config = Config::from_file("md2docx.toml")?;
 let docx = Document::from_directory("./docs/", config)?;
 docx.write_to("output.docx")?;
-
-// Diff
-use md2docx::diff::{DiffMode, diff_markdown};
-
-let old = std::fs::read_to_string("old.md")?;
-let new = std::fs::read_to_string("new.md")?;
-let docx = diff_markdown(&old, &new, DiffMode::TrackChanges)?;
-docx.write_to("diff.docx")?;
 ```
 
 ### WASM Usage
@@ -1014,9 +997,6 @@ const doc = new Document()
   .add_markdown("ch01.md", ch01Content)
   .set_config({ toc: true, page_numbers: true })
   .build();
-
-// Diff
-const diffBytes = diff_documents(oldMd, newMd, { mode: 'track' });
 
 // With template (loaded as bytes)
 const templateBytes = await fetch('template.docx').then(r => r.arrayBuffer());

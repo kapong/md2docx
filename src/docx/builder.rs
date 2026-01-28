@@ -126,9 +126,9 @@ impl ImageContext {
     /// For now, we assign a placeholder rel_id. The actual ID will be
     /// assigned during packaging when relationships are finalized.
     pub fn add_image(&mut self, src: &str, width: Option<&str>) -> String {
-        // Generate unique ID (offset by 3 since rId1-3 are used for styles, settings, fontTable)
-        // This ensures the first image gets rId4
-        let rel_id = format!("rId{}", self.next_id + 3);
+        // Generate unique ID (offset by 6 since rId1-5 are used for styles, settings, fontTable, webSettings, theme)
+        // This ensures the first image gets rId7
+        let rel_id = format!("rId{}", self.next_id + 6);
         let filename = self.generate_filename(src);
 
         // Try to read actual dimensions
@@ -155,29 +155,62 @@ impl ImageContext {
         rel_id
     }
 
-    /// Add a mermaid diagram SVG and return its relationship ID
-    pub fn add_mermaid_svg(&mut self, filename: &str, data: Vec<u8>) -> String {
-        let rel_id = format!("rId{}", self.next_id + 3);
+    /// Add image from raw data (for generated images like mermaid PNGs)
+    pub fn add_image_data(&mut self, filename: &str, data: Vec<u8>, width: Option<&str>) -> String {
+        let rel_id = format!("rId{}", self.next_id + 6);
 
-        // Read SVG dimensions and calculate proper size
+        // Try to read dimensions from the image data
         let (width_emu, height_emu) = if let Some(dims) = read_image_dimensions(&data) {
             default_image_size_emu(dims)
         } else {
-            // Fallback to 6x4 inches
+            // Fallback to default size
             (6 * 914400, 4 * 914400)
+        };
+
+        // Apply width override if specified
+        let (final_width, final_height) = if let Some(w) = width {
+            self.calculate_size_with_aspect_ratio(w, width_emu, height_emu)
+        } else {
+            (width_emu, height_emu)
         };
 
         self.images.push(ImageInfo {
             filename: filename.to_string(),
             rel_id: rel_id.clone(),
-            src: filename.to_string(), // Virtual source
+            src: filename.to_string(),
             data: Some(data),
-            width_emu,
-            height_emu,
+            width_emu: final_width,
+            height_emu: final_height,
         });
 
         self.next_id += 1;
         rel_id
+    }
+
+    /// Calculate size preserving aspect ratio when width is specified
+    fn calculate_size_with_aspect_ratio(
+        &self,
+        width_spec: &str,
+        current_w: i64,
+        current_h: i64,
+    ) -> (i64, i64) {
+        let aspect_ratio = current_h as f64 / current_w as f64;
+
+        let new_width = if width_spec.ends_with('%') {
+            let pct: f64 = width_spec.trim_end_matches('%').parse().unwrap_or(100.0);
+            (6.0 * 914400.0 * (pct / 100.0)) as i64 // % of 6 inches
+        } else if width_spec.ends_with("in") {
+            let inches: f64 = width_spec.trim_end_matches("in").parse().unwrap_or(6.0);
+            (inches * 914400.0) as i64
+        } else if width_spec.ends_with("px") {
+            let px: f64 = width_spec.trim_end_matches("px").parse().unwrap_or(576.0);
+            (px / 96.0 * 914400.0) as i64
+        } else {
+            current_w
+        };
+
+        let new_height = (new_width as f64 * aspect_ratio) as i64;
+        (new_width, new_height)
     }
 
     /// Generate a unique filename for the image
@@ -639,20 +672,24 @@ fn block_to_elements(
         }
 
         Block::Mermaid { content, id } => {
-            match crate::mermaid::render_to_svg(content) {
-                Ok(svg) => {
+            match crate::mermaid::render_to_png(content, 2.0) {
+                // 2x scale for high quality
+                Ok(png_data) => {
                     // Register figure anchor if id is present
                     if let Some(fig_id) = id {
                         ctx.xref_ctx.register_figure(fig_id, "Mermaid Diagram");
                     }
 
                     // Generate a virtual filename
-                    let filename = format!("mermaid{}.svg", ctx.image_id);
+                    let filename = format!("mermaid{}.png", ctx.image_id);
 
-                    // Add to image context
-                    let rel_id = ctx.image_ctx.add_mermaid_svg(&filename, svg.into_bytes());
+                    // Add to image context as PNG
+                    let rel_id = ctx.image_ctx.add_image_data(
+                        &filename, png_data,
+                        None, // No explicit width, let it use natural size
+                    );
 
-                    // Get dimensions from context (last added image)
+                    // Get dimensions from the PNG data
                     let (width_emu, height_emu) = ctx
                         .image_ctx
                         .images
@@ -670,7 +707,7 @@ fn block_to_elements(
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to render mermaid diagram: {}", e);
-                    // Fallback to code block (represented as paragraphs)
+                    // Fallback to code block
                     block_to_paragraphs(block, list_level, ctx, skip_toc)
                         .into_iter()
                         .map(|p| DocElement::Paragraph(Box::new(p)))

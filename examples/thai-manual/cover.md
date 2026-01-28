@@ -9,12 +9,10 @@ page_break_before: false
 
 ## คู่มือการใช้งาน
 
+```mermaid
+flowchart LR
+    A[Start] --> B[Process]
+    B --> C[End]
+```
+
 **เวอร์ชัน 1.0**
-
-*มกราคม 2569*
-
-
-**จัดทำโดย**
-ทีมพัฒนา md2docx
-
-© 2569 md2docx Project

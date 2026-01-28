@@ -1,15 +1,18 @@
 [document]
 title = "คู่มือการใช้งาน md2docx"
 subtitle = "แปลง Markdown เป็น DOCX อย่างมืออาชีพ"
-author = "ทีมพัฒนา md2docx"
-date = "auto"
+author = "พงศ์พันธ์ เพียรพานิชย์"
+date = "2026-01-29"
 language = "th"
 
 [template]
+# Use directory-based template system
+dir = "template"
+# Fallback to single file if needed
 file = "custom-reference.docx"
 
 [output]
-file = "output/คู่มือ-md2docx.docx"
+file = "output/manual-md2docx.docx"
 
 [toc]
 enabled = true
@@ -46,3 +49,11 @@ skip_cover = true
 left = ""
 center = "{page}"
 right = ""
+
+[chapters]
+pattern = "ch*_*.md"
+sort = "numeric"
+
+[appendices]
+pattern = "ap*_*.md"
+prefix = "ภาคผนวก"

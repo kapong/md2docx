@@ -18,11 +18,16 @@ pub mod docx;
 pub mod error;
 pub mod i18n;
 pub mod parser;
+pub mod template;
 
 pub use docx::ooxml::{FooterConfig, HeaderConfig, HeaderFooterField};
 pub use docx::toc::TocConfig;
 pub use docx::DocumentConfig;
 pub use parser::{IncludeConfig, IncludeResolver, ParsedDocument};
+pub use template::{PlaceholderContext, TemplateDir, TemplateSet};
+
+// Re-export template extraction types for use in examples
+pub use template::extract::{CoverTemplate, HeaderFooterTemplate, ImageTemplate, TableTemplate};
 
 pub mod mermaid;
 
@@ -241,9 +246,150 @@ pub fn markdown_to_docx_with_config(
     lang: Language,
     config: &DocumentConfig,
 ) -> Result<Vec<u8>> {
+    markdown_to_docx_with_templates(markdown, lang, config, None, &PlaceholderContext::default())
+}
+
+/// Convert markdown to DOCX with template support
+///
+/// This function extends `markdown_to_docx_with_config` by adding support for
+/// template directories containing cover.docx, table.docx, image.docx, and
+/// header-footer.docx files.
+///
+/// # Arguments
+/// * `markdown` - The markdown content to convert
+/// * `lang` - The language for fonts and styles
+/// * `config` - Document configuration
+/// * `templates` - Optional template set loaded from template directory
+/// * `placeholder_ctx` - Context for placeholder replacement in templates
+///
+/// # Returns
+/// A `Result` containing the DOCX file as bytes
+///
+/// # Example
+/// ```rust,no_run
+/// use md2docx::{
+///     markdown_to_docx_with_templates, DocumentConfig, Language,
+///     PlaceholderContext, TemplateSet
+/// };
+///
+/// let md = "# Hello World\n\nThis is content.";
+/// let config = DocumentConfig::default();
+/// let templates = TemplateSet::default(); // Load from TemplateDir
+/// let ctx = PlaceholderContext::default();
+///
+/// let docx_bytes = markdown_to_docx_with_templates(
+///     md, Language::English, &config, Some(&templates), &ctx
+/// ).unwrap();
+/// ```
+/// Convert markdown to DOCX with template support
+///
+/// This function extends `markdown_to_docx_with_config` by adding support for
+/// template directories containing cover.docx, table.docx, image.docx, and
+/// header-footer.docx files.
+///
+/// # Arguments
+/// * `markdown` - The markdown content to convert
+/// * `lang` - The language for fonts and styles
+/// * `config` - Document configuration
+/// * `templates` - Optional template set loaded from template directory
+/// * `placeholder_ctx` - Context for placeholder replacement in templates
+///
+/// # Returns
+/// A `Result` containing the DOCX file as bytes
+///
+/// # Example
+/// ```rust,no_run
+/// use md2docx::{
+///     markdown_to_docx_with_templates, DocumentConfig, Language,
+///     PlaceholderContext, TemplateSet
+/// };
+///
+/// let md = "# Hello World\n\nThis is content.";
+/// let config = DocumentConfig::default();
+/// let templates = TemplateSet::default(); // Load from TemplateDir
+/// let ctx = PlaceholderContext::default();
+///
+/// let docx_bytes = markdown_to_docx_with_templates(
+///     md, Language::English, &config, Some(&templates), &ctx
+/// ).unwrap();
+/// ```
+pub fn markdown_to_docx_with_templates(
+    markdown: &str,
+    lang: Language,
+    config: &DocumentConfig,
+    templates: Option<&crate::template::TemplateSet>,
+    placeholder_ctx: &crate::template::PlaceholderContext,
+) -> Result<Vec<u8>> {
     let parsed = parse_markdown_with_frontmatter(markdown);
 
-    let mut build_result = build_document(&parsed, lang, config);
+    let mut rel_manager = crate::docx::RelIdManager::new();
+    let mut build_result = build_document(&parsed, lang, config, &mut rel_manager);
+
+    // Apply templates if provided
+    if let Some(template_set) = templates {
+        // Apply cover template
+        if let Some(cover) = &template_set.cover {
+            apply_cover_template(
+                &mut build_result,
+                cover,
+                placeholder_ctx,
+                lang,
+                &mut rel_manager,
+            )?;
+        }
+
+        // Ensure Chapter 1 starts at page 1
+        // Find the first Heading 1
+        let mut chapter1_index = None;
+        for (i, elem) in build_result.document.elements.iter().enumerate() {
+            if let crate::docx::ooxml::DocElement::Paragraph(p) = elem {
+                if p.style_id.as_deref() == Some("Heading1") {
+                    chapter1_index = Some(i);
+                    break;
+                }
+            }
+        }
+
+        if let Some(idx) = chapter1_index {
+            // Check if there is a section break immediately before it
+            let needs_break = if idx > 0 {
+                if let crate::docx::ooxml::DocElement::Paragraph(p) =
+                    &build_result.document.elements[idx - 1]
+                {
+                    !p.is_section_break()
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+
+            if needs_break {
+                // Insert a section break before Chapter 1
+                let mut section_break =
+                    crate::docx::ooxml::Paragraph::new().section_break("nextPage");
+
+                // Restart page numbering at 1
+                section_break.page_num_start = Some(1);
+
+                build_result.document.elements.insert(
+                    idx,
+                    crate::docx::ooxml::DocElement::Paragraph(Box::new(section_break)),
+                );
+            } else {
+                // Update existing section break
+                if let crate::docx::ooxml::DocElement::Paragraph(p) =
+                    &mut build_result.document.elements[idx - 1]
+                {
+                    p.page_num_start = Some(1);
+                }
+            }
+        }
+    }
+
+    // Note: Table and image templates would be applied during block processing
+    // This requires modifying the builder to use template styles
+    // For now, we just load and extract the templates
 
     let buffer = Cursor::new(Vec::new());
     let mut packager = Packager::new(buffer);
@@ -255,7 +401,6 @@ pub fn markdown_to_docx_with_config(
 
     // Process images
     for image in &build_result.images.images {
-        // 1. Add content type
         let ext = std::path::Path::new(&image.filename)
             .extension()
             .and_then(|s| s.to_str())
@@ -270,41 +415,30 @@ pub fn markdown_to_docx_with_config(
             _ => "application/octet-stream",
         };
         content_types.add_image_extension(ext, content_type);
-
-        // 2. Add relationship
-        // Use add_image_with_id to ensure the relationship ID matches what's in the document.xml
-        // The ImageContext generates specific IDs (rId4, rId5...) which we must preserve.
         doc_rels.add_image_with_id(&image.rel_id, &image.filename);
 
-        // Sanity check (optional but good for debugging)
-        if image.rel_id.starts_with("rId") {
-            // We trust the image.rel_id
-        }
-
-        // 3. Add image file (CLI only)
         #[cfg(not(target_arch = "wasm32"))]
         {
             if let Some(ref data) = image.data {
-                // Use embedded data (e.g., Mermaid SVG)
                 packager.add_image(&image.filename, data)?;
             } else if let Ok(data) = std::fs::read(&image.src) {
-                // Load from file system
                 packager.add_image(&image.filename, &data)?;
             }
         }
     }
 
-    // Always add footnotes.xml (settings.xml references footnote IDs -1 and 0)
-    // Even with no user footnotes, the separators must exist
+    // Add footnotes
     content_types.add_footnotes();
-    doc_rels.add_footnotes();
+    let footnotes_rel_id = rel_manager.next_id();
+    doc_rels.add_footnotes_with_id(&footnotes_rel_id);
     let footnotes_xml = build_result.footnotes.to_xml()?;
     packager.add_footnotes(&footnotes_xml)?;
 
-    // Always add endnotes.xml (settings.xml references endnote IDs -1 and 0)
+    // Add endnotes
     use crate::docx::ooxml::EndnotesXml;
     content_types.add_endnotes();
-    doc_rels.add_endnotes();
+    let endnotes_rel_id = rel_manager.next_id();
+    doc_rels.add_endnotes_with_id(&endnotes_rel_id);
     let endnotes = EndnotesXml::new();
     let endnotes_xml = endnotes.to_xml()?;
     packager.add_endnotes(&endnotes_xml)?;
@@ -314,36 +448,37 @@ pub fn markdown_to_docx_with_config(
         doc_rels.add_hyperlink_with_id(&link.rel_id, &link.url);
     }
 
-    // Always add numbering.xml for list support
+    // Add numbering
     content_types.add_numbering();
-    doc_rels.add_numbering();
+    let numbering_rel_id = rel_manager.next_id();
+    doc_rels.add_numbering_with_id(&numbering_rel_id);
     let numbering_xml = generate_numbering_xml_with_context(&build_result.numbering)?;
     packager.add_numbering(&numbering_xml)?;
 
-    // Process headers and capture returned relationship IDs
+    // Process headers
     let mut header_rel_ids: Vec<(u32, String)> = Vec::new();
     for (header_num, _) in &build_result.headers {
         content_types.add_header(*header_num);
-        let rel_id = doc_rels.add_header(*header_num);
+        let rel_id = rel_manager.next_id();
+        doc_rels.add_header_with_id(&rel_id, *header_num);
         header_rel_ids.push((*header_num, rel_id));
     }
 
-    // Process footers and capture returned relationship IDs
+    // Process footers
     let mut footer_rel_ids: Vec<(u32, String)> = Vec::new();
     for (footer_num, _) in &build_result.footers {
         content_types.add_footer(*footer_num);
-        let rel_id = doc_rels.add_footer(*footer_num);
+        let rel_id = rel_manager.next_id();
+        doc_rels.add_footer_with_id(&rel_id, *footer_num);
         footer_rel_ids.push((*footer_num, rel_id));
     }
 
-    // Update header/footer refs with actual relationship IDs from doc_rels
-    // Header 1 is default, header 2 is first page
+    // Update header/footer refs
     for (num, rel_id) in &header_rel_ids {
         if *num == 1 {
             build_result.document.header_footer_refs.default_header_id = Some(rel_id.clone());
         } else if *num == 2 {
             build_result.document.header_footer_refs.first_header_id = Some(rel_id.clone());
-            // Also store as empty header ID for suppression
             build_result.document.empty_header_id = Some(rel_id.clone());
         }
     }
@@ -353,7 +488,6 @@ pub fn markdown_to_docx_with_config(
             build_result.document.header_footer_refs.default_footer_id = Some(rel_id.clone());
         } else if *num == 2 {
             build_result.document.header_footer_refs.first_footer_id = Some(rel_id.clone());
-            // Also store as empty footer ID for suppression
             build_result.document.empty_footer_id = Some(rel_id.clone());
         }
     }
@@ -367,18 +501,200 @@ pub fn markdown_to_docx_with_config(
         lang,
     )?;
 
-    // Add headers to the archive
+    // Add headers
     for (header_num, header_bytes) in &build_result.headers {
         packager.add_header(*header_num, header_bytes)?;
     }
 
-    // Add footers to the archive
+    // Add footers
     for (footer_num, footer_bytes) in &build_result.footers {
         packager.add_footer(*footer_num, footer_bytes)?;
     }
 
     let cursor = packager.finish()?;
     Ok(cursor.into_inner())
+}
+
+/// Apply cover template to the document
+///
+/// This function clones the raw XML from cover.docx, replaces placeholders,
+/// and inserts it directly into the document. This preserves all original
+/// formatting, positions, images, and relationships exactly as designed in Word.
+fn apply_cover_template(
+    build_result: &mut crate::docx::BuildResult,
+    cover: &crate::template::extract::CoverTemplate,
+    placeholder_ctx: &crate::template::PlaceholderContext,
+    lang: Language,
+    rel_manager: &mut crate::docx::RelIdManager,
+) -> Result<()> {
+    use crate::template::placeholder::replace_placeholders;
+
+    // If we have raw XML from the cover template, use it directly
+    if let Some(raw_xml) = &cover.raw_xml {
+        // Clone the raw XML
+        let mut processed_xml = raw_xml.clone();
+
+        // Handle {{inside}} placeholder specially - it needs markdown rendering
+        // Render inside content to XML string
+        let inside_xml = if let Some(inside_md) = placeholder_ctx.get("inside") {
+            // Parse the inside content as markdown
+            let inside_parsed = parse_markdown_with_frontmatter(inside_md);
+
+            // Build the inside content WITHOUT TOC
+            let inside_config = DocumentConfig {
+                toc: crate::docx::toc::TocConfig {
+                    enabled: false,
+                    ..Default::default()
+                },
+                // id_offset: 20000, // No longer needed with RelIdManager
+                ..Default::default()
+            };
+            // Use the same rel_manager!
+            let inside_result = build_document(&inside_parsed, lang, &inside_config, rel_manager);
+
+            // Merge resources from inside_result into main build_result
+            build_result
+                .images
+                .images
+                .extend(inside_result.images.images);
+            build_result
+                .hyperlinks
+                .hyperlinks
+                .extend(inside_result.hyperlinks.hyperlinks);
+
+            // Generate XML string for the inside content
+            // We use a temporary DocumentXml to serialize just these elements
+            let mut temp_doc = crate::docx::ooxml::DocumentXml::new();
+            for elem in inside_result.document.elements {
+                // Skip section breaks in inside content to avoid extra pages
+                if let crate::docx::ooxml::DocElement::Paragraph(p) = &elem {
+                    if p.is_section_break() {
+                        continue;
+                    }
+                }
+                temp_doc.elements.push(elem);
+            }
+            // Use to_xml to get the XML string, but we need to extract body content
+            let full_xml = String::from_utf8(temp_doc.to_xml()?).unwrap_or_default();
+
+            // Extract content between <w:body> and </w:body> (excluding sectPr)
+            if let Some(start) = full_xml.find("<w:body>") {
+                if let Some(end) = full_xml.rfind("<w:sectPr") {
+                    // Find last sectPr
+                    full_xml[start + 8..end].to_string()
+                } else if let Some(end) = full_xml.find("</w:body>") {
+                    full_xml[start + 8..end].to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        // Replace {{inside}} with the rendered XML - DO THIS BEFORE replace_placeholders
+        if processed_xml.contains("{{inside}}") {
+            if !inside_xml.is_empty() {
+                // Try to find the paragraph containing {{inside}} and replace the whole paragraph
+                // to avoid nesting paragraphs inside paragraphs (invalid OOXML)
+                if let Some(placeholder_pos) = processed_xml.find("{{inside}}") {
+                    // Find start of paragraph: look backwards for <w:p> or <w:p ...>
+                    // We must avoid matching <w:pPr> or other tags starting with <w:p
+                    let slice = &processed_xml[..placeholder_pos];
+                    let p_start_1 = slice.rfind("<w:p>");
+                    let p_start_2 = slice.rfind("<w:p ");
+
+                    let p_start = match (p_start_1, p_start_2) {
+                        (Some(a), Some(b)) => Some(std::cmp::max(a, b)),
+                        (Some(a), None) => Some(a),
+                        (None, Some(b)) => Some(b),
+                        (None, None) => None,
+                    };
+
+                    // Find end of paragraph: look forwards for </w:p>
+                    let p_end = processed_xml[placeholder_pos..].find("</w:p>");
+
+                    if let (Some(start), Some(end_offset)) = (p_start, p_end) {
+                        let end = placeholder_pos + end_offset + 6; // +6 length of </w:p>
+
+                        // Replace the entire paragraph with inside_xml
+                        let mut new_xml = String::new();
+                        new_xml.push_str(&processed_xml[..start]);
+                        new_xml.push_str(&inside_xml);
+                        new_xml.push_str(&processed_xml[end..]);
+                        processed_xml = new_xml;
+                    } else {
+                        // Fallback: simple text replacement
+                        processed_xml = processed_xml.replace("{{inside}}", &inside_xml);
+                    }
+                }
+            } else {
+                // Remove {{inside}} if no content provided
+                processed_xml = processed_xml.replace("{{inside}}", "");
+            }
+        }
+
+        // Replace other simple placeholders (like {{title}}, {{author}})
+        processed_xml = replace_placeholders(&processed_xml, placeholder_ctx);
+
+        // Fix image relationship IDs
+        // Map old rId (from cover.docx) to new rId (in generated docx)
+        for element in &cover.elements {
+            if let crate::template::extract::CoverElement::Image {
+                rel_id,
+                filename,
+                data,
+                width,
+                height,
+                ..
+            } = element
+            {
+                if let Some(img_data) = data {
+                    // Generate new relationship ID using RelIdManager
+                    let new_rel_id = rel_manager.get_mapped_id("cover", rel_id);
+
+                    // Replace old ID with new ID in the XML
+                    // Note: This is a simple string replacement.
+                    // It might replace other things if rId matches text content.
+                    // Ideally we'd scope this to r:embed attributes.
+                    processed_xml = processed_xml
+                        .replace(&format!("\"{}\"", rel_id), &format!("\"{}\"", new_rel_id));
+
+                    // Add image to build result
+                    let cover_img_filename = format!("cover_{}", filename);
+                    let img_info = crate::docx::ImageInfo {
+                        filename: cover_img_filename.clone(),
+                        rel_id: new_rel_id,
+                        src: filename.clone(),
+                        data: Some(img_data.clone()),
+                        width_emu: *width,
+                        height_emu: *height,
+                    };
+                    build_result.images.images.push(img_info);
+                }
+            }
+        }
+
+        // Add the processed raw XML as a DocElement
+        // Insert at the beginning of the document
+        build_result
+            .document
+            .elements
+            .insert(0, crate::docx::ooxml::DocElement::RawXml(processed_xml));
+
+        // Add a section break after the cover to separate it from TOC/content
+        let cover_section_break = crate::docx::ooxml::Paragraph::new()
+            .section_break("nextPage")
+            .suppress_header_footer();
+        build_result.document.elements.insert(
+            1,
+            crate::docx::ooxml::DocElement::Paragraph(Box::new(cover_section_break)),
+        );
+    }
+
+    Ok(())
 }
 
 /// Resolve include directives in a parsed document
@@ -475,7 +791,12 @@ pub fn markdown_to_docx_with_includes(
         Language::English
     };
 
-    let mut build_result = build_document(&parsed, lang, &DocumentConfig::default());
+    let mut build_result = build_document(
+        &parsed,
+        lang,
+        &DocumentConfig::default(),
+        &mut crate::docx::RelIdManager::new(),
+    );
 
     let buffer = Cursor::new(Vec::new());
     let mut packager = Packager::new(buffer);
@@ -892,7 +1213,8 @@ mod tests {
         };
 
         let parsed = parse_markdown_with_frontmatter(md);
-        let build_result = build_document(&parsed, Language::English, &config);
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let build_result = build_document(&parsed, Language::English, &config, &mut rel_manager);
 
         // Verify headers and footers were generated
         assert!(
@@ -918,8 +1240,11 @@ mod tests {
         content_types.add_footer(1);
 
         // Add header/footer relationships (returns the relationship IDs)
-        let header_rel_id = doc_rels.add_header(1);
-        let footer_rel_id = doc_rels.add_footer(1);
+        let header_rel_id = rel_manager.next_id();
+        doc_rels.add_header_with_id(&header_rel_id, 1);
+
+        let footer_rel_id = rel_manager.next_id();
+        doc_rels.add_footer_with_id(&footer_rel_id, 1);
 
         packager
             .package(
@@ -981,7 +1306,13 @@ mod tests {
         // The default config should generate headers and footers
         // We can verify this by checking that the build result includes them
         let parsed = parse_markdown_with_frontmatter(md);
-        let build_result = build_document(&parsed, Language::English, &DocumentConfig::default());
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let build_result = build_document(
+            &parsed,
+            Language::English,
+            &DocumentConfig::default(),
+            &mut rel_manager,
+        );
 
         // Default config has headers and footers
         assert!(

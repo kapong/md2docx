@@ -40,7 +40,11 @@ pub struct DocumentSection {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct TemplateSection {
+    /// Single template file (legacy)
     pub file: Option<PathBuf>,
+    /// Template directory containing cover.docx, table.docx, etc.
+    pub dir: Option<PathBuf>,
+    /// Validate template has required styles
     pub validate: bool,
 }
 
@@ -58,6 +62,7 @@ pub struct TocSection {
     pub enabled: bool,
     pub depth: u8,
     pub title: String,
+    pub after_cover: bool, // If true, TOC comes after cover content
 }
 
 impl Default for TocSection {
@@ -66,6 +71,7 @@ impl Default for TocSection {
             enabled: false,
             depth: 3,
             title: "Table of Contents".to_string(),
+            after_cover: true,
         }
     }
 }
@@ -500,6 +506,8 @@ pattern = "ap*_*.md"
 
         assert_eq!(config.toc.enabled, false);
         assert_eq!(config.toc.depth, 3);
+        assert_eq!(config.toc.title, "Table of Contents".to_string());
+        assert_eq!(config.toc.after_cover, true);
 
         assert_eq!(config.page_numbers.enabled, true);
         assert_eq!(config.page_numbers.skip_cover, true);

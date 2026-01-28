@@ -1,7 +1,8 @@
-pub mod image_utils;
 mod builder;
+pub mod image_utils;
 pub mod ooxml;
-mod packager;
+pub mod packager;
+pub mod rels_manager;
 pub mod template;
 pub mod toc;
 pub mod xref;
@@ -12,6 +13,7 @@ pub use builder::{
 };
 pub use ooxml::*;
 pub use packager::*;
+pub use rels_manager::RelIdManager;
 pub use template::*;
 pub use toc::*;
 pub use xref::{AnchorInfo, CrossRefContext};

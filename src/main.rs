@@ -223,6 +223,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     header: header_config,
                     footer: footer_config,
                     different_first_page: project_config.page_numbers.skip_chapter_first,
+                    template_dir: None,
+                    id_offset: 0,
+                    process_all_headings: false,
                 };
 
                 (combined, lang, doc_config, Some(input_dir.clone()))

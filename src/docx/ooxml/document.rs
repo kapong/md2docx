@@ -499,6 +499,11 @@ impl Paragraph {
         self
     }
 
+    /// Check if this paragraph has a section break
+    pub fn is_section_break(&self) -> bool {
+        self.section_break.is_some()
+    }
+
     /// Suppress header/footer references in section break
     pub fn suppress_header_footer(mut self) -> Self {
         self.suppress_header_footer = true;
@@ -857,6 +862,7 @@ pub enum DocElement {
     Paragraph(Box<Paragraph>),
     Table(Table),
     Image(ImageElement),
+    RawXml(String), // Raw XML content (e.g. from cover template)
 }
 
 /// Table width type
@@ -1183,7 +1189,7 @@ impl DocumentXml {
         writer.write_event(Event::Start(doc))?;
         writer.write_event(Event::Start(BytesStart::new("w:body")))?;
 
-        // Write elements (paragraphs, tables, and images)
+        // Write elements (paragraphs, tables, images, and raw XML)
         for element in &self.elements {
             match element {
                 DocElement::Paragraph(p) => self.write_paragraph(&mut writer, p)?,
@@ -1207,6 +1213,9 @@ impl DocumentXml {
                     writer.write_event(Event::End(BytesEnd::new("w:r")))?;
                     writer.write_event(Event::End(BytesEnd::new("w:p")))?;
                 }
+                DocElement::RawXml(xml) => {
+                    self.write_raw_xml(&mut writer, xml)?;
+                }
             }
         }
 
@@ -1217,6 +1226,50 @@ impl DocumentXml {
         writer.write_event(Event::End(BytesEnd::new("w:document")))?;
 
         Ok(writer.into_inner().into_inner())
+    }
+
+    /// Write raw XML content (e.g. from cover template)
+    fn write_raw_xml<W: std::io::Write>(&self, writer: &mut Writer<W>, xml: &str) -> Result<()> {
+        // Wrap the XML in a wrapper to make it valid XML for parsing
+        let wrapped = format!("<wrapper>{}</wrapper>", xml);
+
+        // Parse the wrapped XML
+        let mut reader = quick_xml::Reader::from_reader(wrapped.as_bytes());
+        reader.config_mut().trim_text_end = false;
+
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner().as_ref()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner().as_ref()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::End(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::Empty(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner().as_ref()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::Text(e)) => {
+                    writer.write_event(Event::Text(e.to_owned()))?;
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(())
     }
 
     /// Write a paragraph element

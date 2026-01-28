@@ -183,38 +183,60 @@ impl Relationships {
         });
     }
 
-    /// Add header
+    /// Add header with auto-generated ID
     pub fn add_header(&mut self, header_num: u32) -> String {
         let id = format!("rId{}", self.next_id);
+        self.add_header_with_id(&id, header_num);
+        id
+    }
+
+    /// Add header with specific ID
+    pub fn add_header_with_id(&mut self, id: &str, header_num: u32) {
         self.add(Relationship {
-            id: id.clone(),
+            id: id.to_string(),
             rel_type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
                 .to_string(),
             target: format!("header{}.xml", header_num),
             target_mode: None,
         });
+    }
+
+    /// Add footer with auto-generated ID
+    pub fn add_footer(&mut self, footer_num: u32) -> String {
+        let id = format!("rId{}", self.next_id);
+        self.add_footer_with_id(&id, footer_num);
         id
     }
 
-    /// Add footer
-    pub fn add_footer(&mut self, footer_num: u32) -> String {
-        let id = format!("rId{}", self.next_id);
+    /// Add footer with specific ID
+    pub fn add_footer_with_id(&mut self, id: &str, footer_num: u32) {
         self.add(Relationship {
-            id: id.clone(),
+            id: id.to_string(),
             rel_type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
                 .to_string(),
             target: format!("footer{}.xml", footer_num),
             target_mode: None,
         });
-        id
     }
 
-    /// Add numbering
+    /// Add numbering with auto-generated ID
     pub fn add_numbering(&mut self) -> String {
         self.add_and_get_id(
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
             "numbering.xml",
         )
+    }
+
+    /// Add numbering with specific ID
+    pub fn add_numbering_with_id(&mut self, id: &str) {
+        self.add(Relationship {
+            id: id.to_string(),
+            rel_type:
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"
+                    .to_string(),
+            target: "numbering.xml".to_string(),
+            target_mode: None,
+        });
     }
 
     /// Add footnotes
@@ -225,12 +247,36 @@ impl Relationships {
         )
     }
 
+    /// Add footnotes with specific ID
+    pub fn add_footnotes_with_id(&mut self, id: &str) {
+        self.add(Relationship {
+            id: id.to_string(),
+            rel_type:
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+                    .to_string(),
+            target: "footnotes.xml".to_string(),
+            target_mode: None,
+        });
+    }
+
     /// Add endnotes
     pub fn add_endnotes(&mut self) -> String {
         self.add_and_get_id(
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes",
             "endnotes.xml",
         )
+    }
+
+    /// Add endnotes with specific ID
+    pub fn add_endnotes_with_id(&mut self, id: &str) {
+        self.add(Relationship {
+            id: id.to_string(),
+            rel_type:
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes"
+                    .to_string(),
+            target: "endnotes.xml".to_string(),
+            target_mode: None,
+        });
     }
 
     /// Generate XML content

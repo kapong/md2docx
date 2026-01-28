@@ -437,6 +437,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Mermaid Diagrams
+
+md2docx รองรับการแปลง Mermaid diagrams เป็นรูปภาพในเอกสาร DOCX โดยอัตโนมัติ
+
+### ประเภท Diagrams ที่รองรับ
+
+- **Flowchart** - แผนผังการไหล
+- **Sequence Diagram** - แผนภาพลำดับการทำงาน
+- **Class Diagram** - แผนภาพคลาส
+- **State Diagram** - แผนภาพสถานะ
+- **ER Diagram** - แผนภาพ Entity-Relationship
+- **Gantt Chart** - แผนภาพตารางเวลา
+
+### ตัวอย่างการใช้งาน
+
+#### Flowchart
+
+```markdown
+```mermaid
+flowchart TD
+    A[เริ่มต้น] --> B{ตรวจสอบ}
+    B -->|ผ่าน| C[ดำเนินการ]
+    B -->|ไม่ผ่าน| D[แจ้งเตือน]
+    C --> E[สิ้นสุด]
+    D --> E
+```
+```
+
+#### Sequence Diagram
+
+```markdown
+```mermaid
+sequenceDiagram
+    participant User
+    participant App
+    participant DB
+    
+    User->>App: ส่งคำขอ
+    App->>DB: ตรวจสอบข้อมูล
+    DB-->>App: ส่งผลลัพธ์
+    App-->>User: แสดงผล
+```
+```
+
+#### Class Diagram
+
+```markdown
+```mermaid
+classDiagram
+    class Animal {
+        +String name
+        +makeSound()
+    }
+    class Dog {
+        +fetch()
+    }
+    Animal <|-- Dog
+```
+```
+
+### คุณสมบัติพิเศษ
+
+- **คุณภาพสูง** - แปลงเป็น SVG แทน PNG คุณภาพคมชัดทุกขนาด
+- **ไม่ต้องติดตั้งเพิ่ม** - ไม่ต้องใช้ Browser หรือ Node.js
+- **เร็ว** - เร็วกว่า mermaid-cli 500-1000 เท่า
+- **แสดงผลถูกต้อง** - ลูกศรและข้อความแสดงครบถ้วน
+
+### ข้อควรระวัง
+
+- หลีกเลี่ยงการใช้ตัวอักษรพิเศษในข้อความ
+- อย่าใช้ขนาด diagram ใหญ่เกินไป (ควรพอดีหน้ากระดาษ)
+
 ## การแก้ไขปัญหา (Troubleshooting)
 
 ### ปัญหาที่พบบ่อย

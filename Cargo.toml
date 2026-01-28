@@ -29,6 +29,9 @@ serde = { version = "1", features = ["derive"] }
 # Error handling
 thiserror = "2"
 
+# Mermaid rendering (native Rust, no browser)
+mermaid-rs-renderer = { git = "https://github.com/1jehuang/mermaid-rs-renderer", default-features = false }
+
 # Utilities
 regex = "1"
 once_cell = "1"

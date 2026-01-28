@@ -147,6 +147,27 @@ impl ImageContext {
         rel_id
     }
 
+    /// Add a mermaid diagram SVG and return its relationship ID
+    pub fn add_mermaid_svg(&mut self, filename: &str, data: Vec<u8>) -> String {
+        let rel_id = format!("rId{}", self.next_id + 5);
+
+        // Default size: 6 inches wide, height calculated for default aspect
+        let width_emu = 6 * 914400;
+        let height_emu = 4 * 914400;
+
+        self.images.push(ImageInfo {
+            filename: filename.to_string(),
+            rel_id: rel_id.clone(),
+            src: filename.to_string(), // Virtual source
+            data: Some(data),
+            width_emu,
+            height_emu,
+        });
+
+        self.next_id += 1;
+        rel_id
+    }
+
     /// Generate a unique filename for the image
     fn generate_filename(&self, src: &str) -> String {
         // Extract extension from source
@@ -595,6 +616,43 @@ fn block_to_elements(
             vec![DocElement::Image(img)]
         }
 
+        Block::Mermaid { content, id } => {
+            match crate::mermaid::render_to_svg(content) {
+                Ok(svg) => {
+                    // Register figure anchor if id is present
+                    if let Some(fig_id) = id {
+                        ctx.xref_ctx.register_figure(fig_id, "Mermaid Diagram");
+                    }
+
+                    // Generate a virtual filename
+                    let filename = format!("mermaid{}.svg", ctx.image_id);
+
+                    // Add to image context
+                    let rel_id = ctx.image_ctx.add_mermaid_svg(&filename, svg.into_bytes());
+
+                    // Get dimensions (default for now)
+                    let width_emu = 6 * 914400;
+                    let height_emu = 4 * 914400;
+
+                    let img = ImageElement::new(&rel_id, width_emu, height_emu)
+                        .alt_text("Mermaid Diagram")
+                        .name(&filename)
+                        .id(*ctx.image_id);
+
+                    *ctx.image_id += 1;
+                    vec![DocElement::Image(img)]
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to render mermaid diagram: {}", e);
+                    // Fallback to code block (represented as paragraphs)
+                    block_to_paragraphs(block, list_level, ctx, skip_toc)
+                        .into_iter()
+                        .map(|p| DocElement::Paragraph(Box::new(p)))
+                        .collect()
+                }
+            }
+        }
+
         Block::Table {
             headers,
             alignments,
@@ -766,9 +824,9 @@ fn block_to_paragraphs(
             vec![]
         }
 
-        Block::Mermaid { .. } => {
-            // Skip mermaid for now - will be handled in Phase 3
-            vec![]
+        Block::Mermaid { content, .. } => {
+            // This is a fallback case if block_to_elements falls back to block_to_paragraphs
+            code_block_to_paragraphs(content, Some("mermaid"), &Vec::new(), false)
         }
 
         Block::Include { resolved, .. } => {

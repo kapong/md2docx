@@ -24,7 +24,6 @@ pub use docx::toc::TocConfig;
 pub use docx::DocumentConfig;
 pub use parser::{IncludeConfig, IncludeResolver, ParsedDocument};
 
-#[cfg(feature = "mermaid-cli")]
 pub mod mermaid;
 
 #[cfg(feature = "git")]
@@ -285,12 +284,13 @@ pub fn markdown_to_docx_with_config(
         // 3. Add image file (CLI only)
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // Try to read file. If fails, we skip adding the file but keep the ref.
-            // Word will show a placeholder with "image not found".
-            if let Ok(data) = std::fs::read(&image.src) {
+            if let Some(ref data) = image.data {
+                // Use embedded data (e.g., Mermaid SVG)
+                packager.add_image(&image.filename, data)?;
+            } else if let Ok(data) = std::fs::read(&image.src) {
+                // Load from file system
                 packager.add_image(&image.filename, &data)?;
             }
-            // If file read fails, silent failure or placeholder is fine for MVP
         }
     }
 
@@ -510,7 +510,9 @@ pub fn markdown_to_docx_with_includes(
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Ok(data) = std::fs::read(&image.src) {
+            if let Some(ref data) = image.data {
+                packager.add_image(&image.filename, data)?;
+            } else if let Ok(data) = std::fs::read(&image.src) {
                 packager.add_image(&image.filename, &data)?;
             }
         }

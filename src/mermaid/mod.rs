@@ -8,6 +8,9 @@ pub use config::MermaidConfig;
 
 use crate::error::Error;
 
+/// Padding factor for SVG canvas (1.15 = 15% extra space)
+const SVG_PADDING_FACTOR: f64 = 1.15;
+
 /// Render mermaid diagram to SVG string with text converted to paths
 ///
 /// This ensures the SVG renders correctly in Microsoft Word, which has
@@ -18,7 +21,7 @@ use crate::error::Error;
 /// * `content` - The mermaid diagram source code
 ///
 /// # Returns
-/// SVG string with text converted to paths
+/// SVG string with text converted to paths and proper canvas sizing
 ///
 /// # Errors
 /// Returns Error if rendering fails
@@ -27,15 +30,13 @@ pub fn render_to_svg(content: &str) -> Result<String, Error> {
     let svg = mermaid_rs_renderer::render(content).map_err(|e| Error::Mermaid(e.to_string()))?;
 
     // Convert text to paths for Word compatibility
-    // This requires usvg and fontdb (enabled via mermaid-png feature)
     #[cfg(feature = "mermaid-png")]
-    {
-        convert_text_to_paths(&svg)
-    }
-    #[cfg(not(feature = "mermaid-png"))]
-    {
-        Ok(svg)
-    }
+    let svg = convert_text_to_paths(&svg)?;
+
+    // Add padding to canvas to prevent arrow/edge clipping
+    let svg = add_canvas_padding(&svg)?;
+
+    Ok(svg)
 }
 
 /// Convert SVG text elements to path elements using usvg
@@ -62,6 +63,71 @@ fn convert_text_to_paths(svg: &str) -> Result<String, Error> {
     Ok(tree.to_string(&WriteOptions::default()))
 }
 
+/// Add padding to SVG canvas to prevent clipping of arrows and edges
+///
+/// This increases the width and height attributes while keeping the viewBox,
+/// effectively adding margin around the diagram content.
+fn add_canvas_padding(svg: &str) -> Result<String, Error> {
+    // Parse the SVG to extract current dimensions
+    let width_re = regex::Regex::new(r#"width="([^"]+)""#).unwrap();
+    let height_re = regex::Regex::new(r#"height="([^"]+)""#).unwrap();
+
+    // Extract current dimensions
+    let width_caps = width_re
+        .captures(svg)
+        .ok_or_else(|| Error::Mermaid("No width attribute found".to_string()))?;
+    let height_caps = height_re
+        .captures(svg)
+        .ok_or_else(|| Error::Mermaid("No height attribute found".to_string()))?;
+
+    let width_str = width_caps.get(1).unwrap().as_str();
+    let height_str = height_caps.get(1).unwrap().as_str();
+
+    // Parse dimensions (handle units like "px", "pt", or unitless)
+    let width: f64 = parse_dimension(width_str)?;
+    let height: f64 = parse_dimension(height_str)?;
+
+    // Calculate new dimensions with padding
+    let new_width = width * SVG_PADDING_FACTOR;
+    let new_height = height * SVG_PADDING_FACTOR;
+
+    // Replace width and height attributes
+    let new_width_attr = format!(r#"width="{}""#, format_dimension(new_width, width_str));
+    let new_height_attr = format!(r#"height="{}""#, format_dimension(new_height, height_str));
+
+    let result = width_re.replace(svg, new_width_attr.as_str());
+    let result = height_re.replace(&result, new_height_attr.as_str());
+
+    Ok(result.to_string())
+}
+
+/// Parse a dimension value (e.g., "100px", "100", "100.5")
+fn parse_dimension(s: &str) -> Result<f64, Error> {
+    let num_str: String = s
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
+
+    num_str
+        .parse::<f64>()
+        .map_err(|_| Error::Mermaid(format!("Invalid dimension: {}", s)))
+}
+
+/// Format a dimension value, preserving original units
+fn format_dimension(value: f64, original: &str) -> String {
+    // Extract unit from original
+    let unit: String = original
+        .chars()
+        .skip_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
+
+    if unit.is_empty() {
+        format!("{:.2}", value)
+    } else {
+        format!("{:.2}{}", value, unit)
+    }
+}
+
 /// Render mermaid diagram to PNG bytes
 ///
 /// This converts SVG to PNG for better compatibility with Microsoft Word versions
@@ -78,7 +144,7 @@ fn convert_text_to_paths(svg: &str) -> Result<String, Error> {
 /// Returns Error if rendering fails
 #[cfg(feature = "mermaid-png")]
 pub fn render_to_png(content: &str, scale: f32) -> Result<Vec<u8>, Error> {
-    // First get the SVG with text converted to paths
+    // First get the SVG with padding and text converted to paths
     let svg = render_to_svg(content)?;
 
     // Convert SVG to PNG
@@ -99,7 +165,7 @@ fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>, Error> {
     use resvg::render;
     use usvg::{Options, Tree};
 
-    // Parse SVG (text-to-path conversion already happened in render_to_svg)
+    // Parse SVG (text-to-path conversion and padding already happened)
     let opt = Options::default();
     let tree =
         Tree::from_str(svg, &opt).map_err(|e| Error::Mermaid(format!("SVG parse error: {}", e)))?;
@@ -174,5 +240,33 @@ mod tests {
         // Should contain path elements and NOT contain "Hello World" as text if conversion worked
         assert!(svg.contains("<path"));
         assert!(!svg.contains(">Hello World<"));
+    }
+
+    #[test]
+    fn test_canvas_padding() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+            <rect width="100" height="50"/>
+        </svg>
+        "#;
+
+        let result = add_canvas_padding(svg).unwrap();
+
+        // Should have 15% padding (100 * 1.15 = 115, 50 * 1.15 = 57.5)
+        assert!(result.contains(r#"width="115.00""#));
+        assert!(result.contains(r#"height="57.50""#));
+    }
+
+    #[test]
+    fn test_canvas_padding_with_units() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100px" height="50px">
+            <rect width="100" height="50"/>
+        </svg>
+        "#;
+
+        let result = add_canvas_padding(svg).unwrap();
+
+        // Should preserve px units
+        assert!(result.contains(r#"width="115.00px""#));
+        assert!(result.contains(r#"height="57.50px""#));
     }
 }

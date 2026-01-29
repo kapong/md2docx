@@ -9,8 +9,9 @@ pub mod xref;
 
 pub use builder::{
     build_document, BuildResult, DocumentConfig, DocumentMeta, HyperlinkContext, HyperlinkInfo,
-    ImageContext, ImageInfo,
+    ImageContext, ImageInfo, NumberingContext,
 };
+pub use builder::{parse_length_to_twips, PageConfig};
 pub use ooxml::{
     generate_numbering_xml_with_context, ContentTypes, DocumentXml, FontConfig, FootnotesXml,
     Language, Paragraph, Relationships, Run, StylesDocument,

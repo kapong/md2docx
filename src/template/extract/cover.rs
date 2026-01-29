@@ -272,6 +272,66 @@ pub fn extract(path: &Path) -> Result<CoverTemplate> {
         }
     }
 
+    // Also extract any additional images referenced in the XML (e.g., SVG companion files)
+    // Scan for all r:embed references and extract any that weren't already extracted
+    let embed_pattern = regex::Regex::new(r#"r:embed="(rId\d+)""#).unwrap();
+    let embed_matches: Vec<String> = embed_pattern
+        .find_iter(&cover_xml)
+        .map(|m| {
+            m.as_str()[9..m.as_str().len() - 1].to_string() // Extract rIdX from r:embed="rIdX"
+        })
+        .collect();
+
+    for rel_id in embed_matches {
+        // Check if this rId is already in elements
+        let already_in_elements = elements.iter().any(|e| {
+            if let CoverElement::Image { rel_id: rid, .. } = e {
+                rid == &rel_id
+            } else {
+                false
+            }
+        });
+
+        if already_in_elements {
+            continue;
+        }
+
+        // This is an additional image (e.g., SVG file), extract it
+        if let Some(img_path) = find_image_path_from_rel_id(&rels_xml, &rel_id) {
+            let filename = std::path::Path::new(&img_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("image.png")
+                .to_string();
+
+            // Try to load the image data
+            let full_path = format!("word/{}", img_path);
+            if let Ok(img_data) = read_archive_file_bytes(&mut archive, &full_path) {
+                // Create dimensions from the existing image or use defaults
+                let (width, height) = elements
+                    .iter()
+                    .find_map(|e| {
+                        if let CoverElement::Image { width, height, .. } = e {
+                            Some((*width, *height))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or((1000000, 1000000));
+
+                elements.push(CoverElement::Image {
+                    rel_id,
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                    filename,
+                    data: Some(img_data),
+                });
+            }
+        }
+    }
+
     // Extract background color if any
     let background_color = extract_background_color(&document_xml);
 
@@ -307,7 +367,7 @@ fn read_archive_file_bytes(
 }
 
 /// Find image path from relationship ID
-fn find_image_path_from_rel_id(rels_xml: &str, rel_id: &str) -> Option<String> {
+pub fn find_image_path_from_rel_id(rels_xml: &str, rel_id: &str) -> Option<String> {
     // Look for Relationship with Id="rel_id" and get Target
     let search_pattern = format!(r#"Id="{}""#, rel_id);
     if let Some(pos) = rels_xml.find(&search_pattern) {

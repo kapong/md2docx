@@ -327,6 +327,80 @@ pub struct DocumentMeta {
     pub date: String,
 }
 
+/// Page layout configuration (dimensions and margins in twips)
+///
+/// 1 twip = 1/20th of a point = 1/1440th of an inch
+/// Common values:
+/// - A4 width: 11906 twips (210mm)
+/// - A4 height: 16838 twips (297mm)
+/// - 1 inch margin: 1440 twips (25.4mm)
+#[derive(Debug, Clone, Default)]
+pub struct PageConfig {
+    /// Page width in twips
+    pub width: Option<u32>,
+    /// Page height in twips
+    pub height: Option<u32>,
+    /// Top margin in twips
+    pub margin_top: Option<u32>,
+    /// Right margin in twips
+    pub margin_right: Option<u32>,
+    /// Bottom margin in twips
+    pub margin_bottom: Option<u32>,
+    /// Left margin in twips
+    pub margin_left: Option<u32>,
+    /// Header margin in twips
+    pub margin_header: Option<u32>,
+    /// Footer margin in twips
+    pub margin_footer: Option<u32>,
+    /// Gutter margin in twips
+    pub margin_gutter: Option<u32>,
+}
+
+/// Parse a length string like "210mm", "8.5in", "297mm" to twips
+///
+/// Supported units:
+/// - mm: millimeters (1mm = 56.692913386 twips)
+/// - cm: centimeters (1cm = 566.92913386 twips)
+/// - in: inches (1in = 1440 twips)
+/// - pt: points (1pt = 20 twips)
+/// - px: pixels at 96 DPI (1px ≈ 15 twips)
+///
+/// Returns None if the string cannot be parsed.
+pub fn parse_length_to_twips(length: &str) -> Option<u32> {
+    let lower = length.to_lowercase();
+    let trimmed = lower.trim();
+
+    // Extract the numeric part and unit
+    let (val_str, unit) = if trimmed.ends_with("mm") {
+        (trimmed.trim_end_matches("mm").trim(), "mm")
+    } else if trimmed.ends_with("cm") {
+        (trimmed.trim_end_matches("cm").trim(), "cm")
+    } else if trimmed.ends_with("in") {
+        (trimmed.trim_end_matches("in").trim(), "in")
+    } else if trimmed.ends_with("pt") {
+        (trimmed.trim_end_matches("pt").trim(), "pt")
+    } else if trimmed.ends_with("px") {
+        (trimmed.trim_end_matches("px").trim(), "px")
+    } else {
+        // Assume raw number is in twips
+        (trimmed, "twips")
+    };
+
+    let val: f64 = val_str.parse().ok()?;
+
+    let twips = match unit {
+        "mm" => val * 56.692913386, // 1440 / 25.4
+        "cm" => val * 566.92913386, // 1440 / 2.54
+        "in" => val * 1440.0,
+        "pt" => val * 20.0,
+        "px" => val * 15.0, // Assuming 96 DPI: 1440 / 96
+        "twips" => val,
+        _ => return None,
+    };
+
+    Some(twips.round() as u32)
+}
+
 /// Document build configuration
 #[derive(Debug, Clone, Default)]
 pub struct DocumentConfig {
@@ -350,6 +424,8 @@ pub struct DocumentConfig {
     pub fonts: Option<crate::docx::ooxml::FontConfig>,
     /// Base directory for resolving relative image paths (e.g., the markdown file's directory)
     pub base_path: Option<std::path::PathBuf>,
+    /// Page layout configuration (dimensions and margins)
+    pub page: Option<PageConfig>,
 }
 
 /// Result of building a document, including tracked images, hyperlinks, footnotes, and headers/footers

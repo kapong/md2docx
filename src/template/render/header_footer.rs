@@ -173,6 +173,17 @@ pub fn render_first_page_footer(
 /// Creates a .rels file that maps relationship IDs to media file targets.
 /// This is required for images in headers/footers to display correctly.
 pub fn generate_header_footer_rels_xml(media: &[(String, MediaFile)]) -> Vec<u8> {
+    generate_header_footer_rels_xml_with_prefix(media, "")
+}
+
+/// Generate relationships XML for a header/footer with optional filename prefix
+///
+/// The `prefix` is added to each media filename to avoid conflicts with images
+/// from other templates (e.g., cover.docx vs header-footer.docx).
+pub fn generate_header_footer_rels_xml_with_prefix(
+    media: &[(String, MediaFile)],
+    prefix: &str,
+) -> Vec<u8> {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -180,10 +191,15 @@ pub fn generate_header_footer_rels_xml(media: &[(String, MediaFile)]) -> Vec<u8>
     );
 
     for (r_id, media_file) in media {
+        let filename = if prefix.is_empty() {
+            media_file.filename.clone()
+        } else {
+            format!("{}{}", prefix, media_file.filename)
+        };
         xml.push_str(&format!(
             r#"  <Relationship Id="{}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/{}"/>
 "#,
-            r_id, media_file.filename
+            r_id, filename
         ));
     }
 
@@ -245,7 +261,7 @@ fn try_consolidate_three_run_pattern(xml: &str, placeholder: &str, full: &str) -
     // Key: Match across all the XML tags between the fragments
 
     let pattern = format!(
-        r#"(?s)(<w:r[^>]*>(?:\s*<w:rPr>.*?</w:rPr>)?(?:\s*<w:tab/>)?\s*<w:t[^>]*>)([^<]*)\{{\{{\s*</w:t>\s*</w:r>\s*<w:r[^>]*>\s*(?:<w:rPr>.*?</w:rPr>)?\s*<w:t[^>]*>\s*{}\s*</w:t>\s*</w:r>\s*<w:r[^>]*>\s*(?:<w:rPr>.*?</w:rPr>)?\s*<w:t[^>]*>\s*\}}\}}([^<]*)</w:t>\s*</w:r>"#,
+        r#"(?s)(<w:r[^>]*>(?:\s*<w:rPr>.*?</w:rPr>)?(?:\s*<w:tab/>)?\s*<w:t[^>]*>)([^<]*)\{{\{{\s*</w:t>\s*</w:r>(?:\s*<w:proofErr[^/]*/>)?\s*<w:r[^>]*>\s*(?:<w:rPr>.*?</w:rPr>)?\s*<w:t[^>]*>\s*{}\s*</w:t>\s*</w:r>(?:\s*<w:proofErr[^/]*/>)?\s*<w:r[^>]*>\s*(?:<w:rPr>.*?</w:rPr>)?\s*<w:t[^>]*>\s*\}}\}}([^<]*)</w:t>\s*</w:r>"#,
         regex::escape(placeholder)
     );
 

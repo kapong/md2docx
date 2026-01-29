@@ -305,6 +305,41 @@ impl ProjectBuilder {
             toc_enabled = false;
         }
 
+        // Build page config from md2docx.toml settings
+        let page_config = {
+            use crate::docx::{parse_length_to_twips, PageConfig};
+
+            let width = parse_length_to_twips(&self.config.document.page_width);
+            let height = parse_length_to_twips(&self.config.document.page_height);
+            let margin_top = parse_length_to_twips(&self.config.document.page_margin_top);
+            let margin_bottom = parse_length_to_twips(&self.config.document.page_margin_bottom);
+            let margin_left = parse_length_to_twips(&self.config.document.page_margin_left);
+            let margin_right = parse_length_to_twips(&self.config.document.page_margin_right);
+
+            // Only create PageConfig if at least one value is set
+            if width.is_some()
+                || height.is_some()
+                || margin_top.is_some()
+                || margin_bottom.is_some()
+                || margin_left.is_some()
+                || margin_right.is_some()
+            {
+                Some(PageConfig {
+                    width,
+                    height,
+                    margin_top,
+                    margin_right,
+                    margin_bottom,
+                    margin_left,
+                    margin_header: None, // Not configured in TOML yet
+                    margin_footer: None, // Not configured in TOML yet
+                    margin_gutter: None, // Not configured in TOML yet
+                })
+            } else {
+                None
+            }
+        };
+
         DocumentConfig {
             title: self.config.document.title.clone(),
             toc: crate::docx::TocConfig {
@@ -332,6 +367,7 @@ impl ProjectBuilder {
                 .map(|d| self.base_dir.join(d)),
             process_all_headings: template_loaded,
             base_path: first_content_dir,
+            page: page_config,
             ..DocumentConfig::default()
         }
     }

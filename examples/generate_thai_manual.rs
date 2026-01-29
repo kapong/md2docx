@@ -241,6 +241,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fonts: font_config,
         // Set base path for resolving relative image paths
         base_path: first_content_file_dir,
+        page: None, // TODO: Add page config support from project config
     };
 
     // Extract inside content from cover.md (content after frontmatter)

@@ -17,7 +17,7 @@ Thumbs.db
 
 # Generated files
 *.docx
-!examples/**/*.docx
+examples/output/*.docx
 
 # Debug/temp files (keep these out)
 temp/

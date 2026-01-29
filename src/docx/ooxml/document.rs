@@ -387,6 +387,16 @@ pub struct Paragraph {
     pub empty_header_footer_refs: Option<HeaderFooterRefs>, // Empty header/footer refs to use when suppressing
     pub bookmark_start: Option<BookmarkStart>,              // Bookmark start element
     pub bookmark_end: bool,                                 // If true, close bookmark after content
+    // Page layout for section breaks (in twips)
+    pub sect_page_width: Option<u32>,    // Page width for sectPr
+    pub sect_page_height: Option<u32>,   // Page height for sectPr
+    pub sect_margin_top: Option<u32>,    // Top margin for sectPr
+    pub sect_margin_right: Option<u32>,  // Right margin for sectPr
+    pub sect_margin_bottom: Option<u32>, // Bottom margin for sectPr
+    pub sect_margin_left: Option<u32>,   // Left margin for sectPr
+    pub sect_margin_header: Option<u32>, // Header margin for sectPr
+    pub sect_margin_footer: Option<u32>, // Footer margin for sectPr
+    pub sect_margin_gutter: Option<u32>, // Gutter margin for sectPr
 }
 
 impl Paragraph {
@@ -411,6 +421,15 @@ impl Paragraph {
             empty_header_footer_refs: None,
             bookmark_start: None,
             bookmark_end: false,
+            sect_page_width: None,
+            sect_page_height: None,
+            sect_margin_top: None,
+            sect_margin_right: None,
+            sect_margin_bottom: None,
+            sect_margin_left: None,
+            sect_margin_header: None,
+            sect_margin_footer: None,
+            sect_margin_gutter: None,
         }
     }
 
@@ -541,6 +560,31 @@ impl Paragraph {
     pub fn with_empty_header_footer_refs(mut self, refs: HeaderFooterRefs) -> Self {
         self.empty_header_footer_refs = Some(refs);
         self.suppress_header_footer = true; // Also set suppress flag
+        self
+    }
+
+    /// Set page layout for section break (in twips)
+    pub fn with_page_layout(
+        mut self,
+        width: Option<u32>,
+        height: Option<u32>,
+        margin_top: Option<u32>,
+        margin_right: Option<u32>,
+        margin_bottom: Option<u32>,
+        margin_left: Option<u32>,
+        margin_header: Option<u32>,
+        margin_footer: Option<u32>,
+        margin_gutter: Option<u32>,
+    ) -> Self {
+        self.sect_page_width = width;
+        self.sect_page_height = height;
+        self.sect_margin_top = margin_top;
+        self.sect_margin_right = margin_right;
+        self.sect_margin_bottom = margin_bottom;
+        self.sect_margin_left = margin_left;
+        self.sect_margin_header = margin_header;
+        self.sect_margin_footer = margin_footer;
+        self.sect_margin_gutter = margin_gutter;
         self
     }
 
@@ -742,21 +786,48 @@ impl Paragraph {
                     writer.write_event(Event::Empty(pg_num_type))?;
                 }
 
-                // Page size
+                // Page size (use configured values or defaults)
                 let mut pg_sz = BytesStart::new("w:pgSz");
-                pg_sz.push_attribute(("w:w", "11906"));
-                pg_sz.push_attribute(("w:h", "16838"));
+                pg_sz.push_attribute((
+                    "w:w",
+                    self.sect_page_width.unwrap_or(11906).to_string().as_str(),
+                ));
+                pg_sz.push_attribute((
+                    "w:h",
+                    self.sect_page_height.unwrap_or(16838).to_string().as_str(),
+                ));
                 writer.write_event(Event::Empty(pg_sz))?;
 
-                // Margins
+                // Margins (use configured values or defaults)
                 let mut pg_mar = BytesStart::new("w:pgMar");
-                pg_mar.push_attribute(("w:top", "1440"));
-                pg_mar.push_attribute(("w:right", "1440"));
-                pg_mar.push_attribute(("w:bottom", "1440"));
-                pg_mar.push_attribute(("w:left", "1440"));
-                pg_mar.push_attribute(("w:header", "708"));
-                pg_mar.push_attribute(("w:footer", "708"));
-                pg_mar.push_attribute(("w:gutter", "0"));
+                pg_mar.push_attribute((
+                    "w:top",
+                    self.sect_margin_top.unwrap_or(1440).to_string().as_str(),
+                ));
+                pg_mar.push_attribute((
+                    "w:right",
+                    self.sect_margin_right.unwrap_or(1440).to_string().as_str(),
+                ));
+                pg_mar.push_attribute((
+                    "w:bottom",
+                    self.sect_margin_bottom.unwrap_or(1440).to_string().as_str(),
+                ));
+                pg_mar.push_attribute((
+                    "w:left",
+                    self.sect_margin_left.unwrap_or(1440).to_string().as_str(),
+                ));
+                pg_mar.push_attribute((
+                    "w:header",
+                    self.sect_margin_header.unwrap_or(708).to_string().as_str(),
+                ));
+                pg_mar.push_attribute((
+                    "w:footer",
+                    self.sect_margin_footer.unwrap_or(708).to_string().as_str(),
+                ));
+                pg_mar.push_attribute((
+                    "w:gutter",
+                    self.sect_margin_gutter.unwrap_or(0).to_string().as_str(),
+                ));
                 writer.write_event(Event::Empty(pg_mar))?;
 
                 // Columns (single column by default)

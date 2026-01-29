@@ -32,6 +32,9 @@ pub use template::{PlaceholderContext, TemplateDir, TemplateSet};
 // Re-export template extraction types for use in examples
 pub use template::extract::{CoverTemplate, HeaderFooterTemplate, ImageTemplate, TableTemplate};
 
+// Re-export helper function for finding image paths
+pub use template::extract::cover::find_image_path_from_rel_id;
+
 pub mod mermaid;
 
 #[cfg(feature = "git")]
@@ -349,6 +352,7 @@ pub fn markdown_to_docx_with_templates(
                 &mut rel_manager,
                 table_template,
                 image_template,
+                doc_config,
             )?;
         }
     }
@@ -450,7 +454,8 @@ pub fn markdown_to_docx_with_templates(
     let mut doc_rels = Relationships::document_rels();
     let styles = StylesDocument::new(lang, doc_config.fonts.clone());
 
-    // Process images
+    // Process images from build_result (includes cover template images and markdown images)
+    // Header/footer images are handled separately with header_ prefix
     for image in &build_result.images.images {
         let ext = std::path::Path::new(&image.filename)
             .extension()
@@ -563,16 +568,23 @@ pub fn markdown_to_docx_with_templates(
     for (header_num, header_bytes, media) in &build_result.headers {
         packager.add_header(*header_num, header_bytes)?;
 
-        // Add media files for this header (skip duplicates)
+        // Add media files for this header (with header_ prefix)
         for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
-            {
-                // Add the media file to the archive
-                packager.add_image(&media_file.filename, &media_file.data)?;
-                added_media_files.insert(media_file.filename.clone());
+            if !media_file.filename.is_empty() {
+                // Add header_ prefix to avoid conflicts with cover images
+                let prefixed_filename = format!("header_{}", media_file.filename);
+
+                // Skip if already added
+                if added_media_files.contains(&prefixed_filename) {
+                    continue;
+                }
+
+                // Add the media file to the archive with prefixed name
+                packager.add_image(&prefixed_filename, &media_file.data)?;
+                added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
-                let ext = std::path::Path::new(&media_file.filename)
+                let ext = std::path::Path::new(&prefixed_filename)
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
@@ -583,7 +595,9 @@ pub fn markdown_to_docx_with_templates(
         // Generate and add rels file if there are media files
         if !media.is_empty() {
             let rels_xml =
-                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+                crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
+                    media, "header_",
+                );
             packager.add_header_rels(*header_num, &rels_xml)?;
         }
     }
@@ -592,16 +606,23 @@ pub fn markdown_to_docx_with_templates(
     for (footer_num, footer_bytes, media) in &build_result.footers {
         packager.add_footer(*footer_num, footer_bytes)?;
 
-        // Add media files for this footer (skip duplicates)
+        // Add media files for this footer (with header_ prefix)
         for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
-            {
-                // Add the media file to the archive
-                packager.add_image(&media_file.filename, &media_file.data)?;
-                added_media_files.insert(media_file.filename.clone());
+            if !media_file.filename.is_empty() {
+                // Add header_ prefix to avoid conflicts with cover images
+                let prefixed_filename = format!("header_{}", media_file.filename);
+
+                // Skip if already added
+                if added_media_files.contains(&prefixed_filename) {
+                    continue;
+                }
+
+                // Add the media file to the archive with prefixed name
+                packager.add_image(&prefixed_filename, &media_file.data)?;
+                added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
-                let ext = std::path::Path::new(&media_file.filename)
+                let ext = std::path::Path::new(&prefixed_filename)
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
@@ -612,7 +633,9 @@ pub fn markdown_to_docx_with_templates(
         // Generate and add rels file if there are media files
         if !media.is_empty() {
             let rels_xml =
-                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+                crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
+                    media, "header_",
+                );
             packager.add_footer_rels(*footer_num, &rels_xml)?;
         }
     }
@@ -634,6 +657,7 @@ fn apply_cover_template(
     rel_manager: &mut crate::docx::RelIdManager,
     table_template: Option<&crate::template::extract::TableTemplate>,
     image_template: Option<&crate::template::extract::ImageTemplate>,
+    doc_config: &DocumentConfig,
 ) -> Result<()> {
     use crate::template::placeholder::replace_placeholders;
 
@@ -648,13 +672,13 @@ fn apply_cover_template(
             // Parse the inside content as markdown
             let inside_parsed = parse_markdown_with_frontmatter(inside_md);
 
-            // Build the inside content WITHOUT TOC
+            // Build the inside content WITHOUT TOC, but WITH page config
             let inside_config = DocumentConfig {
                 toc: crate::docx::toc::TocConfig {
                     enabled: false,
                     ..Default::default()
                 },
-                // id_offset: 20000, // No longer needed with RelIdManager
+                page: doc_config.page.clone(), // Pass page config to inside content
                 ..Default::default()
             };
             // Use the same rel_manager!
@@ -756,6 +780,10 @@ fn apply_cover_template(
 
         // Fix image relationship IDs
         // Map old rId (from cover.docx) to new rId (in generated docx)
+        let mut processed_filenames: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
+        // Process all images from cover.elements (now includes SVG companion files)
         for element in &cover.elements {
             if let crate::template::extract::CoverElement::Image {
                 rel_id,
@@ -771,26 +799,38 @@ fn apply_cover_template(
                     let new_rel_id = rel_manager.get_mapped_id("cover", rel_id);
 
                     // Replace old ID with new ID in the XML
-                    // Note: This is a simple string replacement.
-                    // It might replace other things if rId matches text content.
-                    // Ideally we'd scope this to r:embed attributes.
-                    processed_xml = processed_xml
-                        .replace(&format!("\"{}\"", rel_id), &format!("\"{}\"", new_rel_id));
+                    processed_xml = processed_xml.replace(
+                        &format!("r:embed=\"{}\"", rel_id),
+                        &format!("r:embed=\"{}\"", new_rel_id),
+                    );
 
-                    // Add image to build result
-                    let cover_img_filename = format!("cover_{}", filename);
-                    let img_info = crate::docx::ImageInfo {
-                        filename: cover_img_filename.clone(),
-                        rel_id: new_rel_id,
-                        src: filename.clone(),
-                        data: Some(img_data.clone()),
-                        width_emu: *width,
-                        height_emu: *height,
-                    };
-                    build_result.images.images.push(img_info);
+                    // Check if image with this filename already exists to avoid duplicates
+                    let already_exists = processed_filenames.contains(filename)
+                        || build_result
+                            .images
+                            .images
+                            .iter()
+                            .any(|img| img.filename == *filename);
+                    if !already_exists {
+                        processed_filenames.insert(filename.clone());
+                        // Add image to build result
+                        let img_info = crate::docx::ImageInfo {
+                            filename: filename.clone(),
+                            rel_id: new_rel_id.clone(),
+                            src: filename.clone(),
+                            data: Some(img_data.clone()),
+                            width_emu: *width,
+                            height_emu: *height,
+                        };
+                        build_result.images.images.push(img_info);
+                    }
                 }
             }
         }
+
+        // Strip any <w:sectPr> from the cover XML - we want to control page layout ourselves
+        // The sectPr in the cover template would override our section break settings
+        processed_xml = strip_section_properties(&processed_xml);
 
         // Add the processed raw XML as a DocElement
         // Insert at the beginning of the document
@@ -800,9 +840,26 @@ fn apply_cover_template(
             .insert(0, crate::docx::ooxml::DocElement::RawXml(processed_xml));
 
         // Add a section break after the cover to separate it from TOC/content
-        let cover_section_break = crate::docx::ooxml::Paragraph::new()
+        // Apply page config if available
+        let mut cover_section_break = crate::docx::ooxml::Paragraph::new()
             .section_break("nextPage")
             .suppress_header_footer();
+
+        // Apply page layout from config
+        if let Some(ref page_config) = doc_config.page {
+            cover_section_break = cover_section_break.with_page_layout(
+                page_config.width,
+                page_config.height,
+                page_config.margin_top,
+                page_config.margin_right,
+                page_config.margin_bottom,
+                page_config.margin_left,
+                page_config.margin_header,
+                page_config.margin_footer,
+                page_config.margin_gutter,
+            );
+        }
+
         build_result.document.elements.insert(
             1,
             crate::docx::ooxml::DocElement::Paragraph(Box::new(cover_section_break)),
@@ -810,6 +867,48 @@ fn apply_cover_template(
     }
 
     Ok(())
+}
+
+/// Strip <w:sectPr> elements from XML string
+///
+/// This removes section properties from the cover template XML so that
+/// we can control page layout through our own section break.
+fn strip_section_properties(xml: &str) -> String {
+    let mut result = xml.to_string();
+
+    // Remove <w:sectPr>...</w:sectPr> elements
+    // Handle both self-closing and content forms
+    loop {
+        // Find the start of a sectPr element
+        if let Some(start) = result.find("<w:sectPr") {
+            // Find the end of this element
+            // It could be self-closing: <w:sectPr ... /> or have content: <w:sectPr ...>...</w:sectPr>
+            let after_start = &result[start..];
+
+            // Check if it's self-closing
+            if let Some(self_close) = after_start.find("/>") {
+                let open_end = after_start.find('>').unwrap_or(self_close);
+                if self_close == open_end - 1 {
+                    // It's self-closing: <w:sectPr ... />
+                    result.replace_range(start..start + self_close + 2, "");
+                    continue;
+                }
+            }
+
+            // It's a container element, find the closing tag
+            if let Some(end) = result[start..].find("</w:sectPr>") {
+                result.replace_range(start..start + end + 11, "");
+                continue;
+            }
+
+            // If we can't find the end, break to avoid infinite loop
+            break;
+        } else {
+            break;
+        }
+    }
+
+    result
 }
 
 /// Resolve include directives in a parsed document
@@ -1049,16 +1148,23 @@ pub fn markdown_to_docx_with_includes(
     for (header_num, header_bytes, media) in &build_result.headers {
         packager.add_header(*header_num, header_bytes)?;
 
-        // Add media files for this header (skip duplicates)
+        // Add media files for this header (with header_ prefix)
         for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
-            {
-                // Add the media file to the archive
-                packager.add_image(&media_file.filename, &media_file.data)?;
-                added_media_files.insert(media_file.filename.clone());
+            if !media_file.filename.is_empty() {
+                // Add header_ prefix to avoid conflicts with cover images
+                let prefixed_filename = format!("header_{}", media_file.filename);
+
+                // Skip if already added
+                if added_media_files.contains(&prefixed_filename) {
+                    continue;
+                }
+
+                // Add the media file to the archive with prefixed name
+                packager.add_image(&prefixed_filename, &media_file.data)?;
+                added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
-                let ext = std::path::Path::new(&media_file.filename)
+                let ext = std::path::Path::new(&prefixed_filename)
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
@@ -1069,7 +1175,9 @@ pub fn markdown_to_docx_with_includes(
         // Generate and add rels file if there are media files
         if !media.is_empty() {
             let rels_xml =
-                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+                crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
+                    media, "header_",
+                );
             packager.add_header_rels(*header_num, &rels_xml)?;
         }
     }
@@ -1078,16 +1186,23 @@ pub fn markdown_to_docx_with_includes(
     for (footer_num, footer_bytes, media) in &build_result.footers {
         packager.add_footer(*footer_num, footer_bytes)?;
 
-        // Add media files for this footer (skip duplicates)
+        // Add media files for this footer (with header_ prefix)
         for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
-            {
-                // Add the media file to the archive
-                packager.add_image(&media_file.filename, &media_file.data)?;
-                added_media_files.insert(media_file.filename.clone());
+            if !media_file.filename.is_empty() {
+                // Add header_ prefix to avoid conflicts with cover images
+                let prefixed_filename = format!("header_{}", media_file.filename);
+
+                // Skip if already added
+                if added_media_files.contains(&prefixed_filename) {
+                    continue;
+                }
+
+                // Add the media file to the archive with prefixed name
+                packager.add_image(&prefixed_filename, &media_file.data)?;
+                added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
-                let ext = std::path::Path::new(&media_file.filename)
+                let ext = std::path::Path::new(&prefixed_filename)
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
@@ -1098,7 +1213,9 @@ pub fn markdown_to_docx_with_includes(
         // Generate and add rels file if there are media files
         if !media.is_empty() {
             let rels_xml =
-                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+                crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
+                    media, "header_",
+                );
             packager.add_footer_rels(*footer_num, &rels_xml)?;
         }
     }

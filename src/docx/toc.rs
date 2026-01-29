@@ -151,6 +151,8 @@ impl TocBuilder {
             .line_spacing(240, "auto")
             .section_break("nextPage")
             .suppress_header_footer();
+        // Note: Page numbering restart for Chapter 1 is handled in lib.rs
+        // by setting page_num_start on the section break *following* Chapter 1 (or doc defaults)
         elements.push(DocElement::Paragraph(Box::new(section_break)));
 
         elements

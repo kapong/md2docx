@@ -37,6 +37,7 @@ pub struct Run {
     pub instr_text: bool,         // If true, this is instruction text for a field
     pub tab: bool,                // If true, this run contains a tab character
     pub lang: Option<String>,     // Language for spell-check (auto-detected from text)
+    pub break_type: Option<String>, // "page", "column", "textWrapping"
 }
 
 impl Run {
@@ -61,6 +62,7 @@ impl Run {
             instr_text: false,
             tab: false,
             lang,
+            break_type: None,
         }
     }
 
@@ -139,6 +141,12 @@ impl Run {
     /// Add a tab character to this run
     pub fn with_tab(mut self) -> Self {
         self.tab = true;
+        self
+    }
+
+    /// Add a page break to this run
+    pub fn with_page_break(mut self) -> Self {
+        self.break_type = Some("page".to_string());
         self
     }
 
@@ -282,6 +290,15 @@ impl Run {
         // Tab character
         if self.tab {
             writer.write_event(Event::Empty(BytesStart::new("w:tab")))?;
+        }
+
+        // Break
+        if let Some(break_type) = &self.break_type {
+            let mut br = BytesStart::new("w:br");
+            if break_type != "textWrapping" {
+                br.push_attribute(("w:type", break_type.as_str()));
+            }
+            writer.write_event(Event::Empty(br))?;
         }
 
         // Footnote reference (if present)
@@ -479,6 +496,13 @@ impl Paragraph {
     /// Force page break before paragraph
     pub fn page_break_before(mut self) -> Self {
         self.page_break_before = true;
+        self
+    }
+
+    /// Add a page break as a run
+    pub fn page_break(mut self) -> Self {
+        self.children
+            .push(ParagraphChild::Run(Run::new("").with_page_break()));
         self
     }
 
@@ -1116,6 +1140,13 @@ pub struct DocumentXml {
     pub header_footer_refs: HeaderFooterRefs, // Header/footer references
     pub empty_header_id: Option<String>,      // ID for empty header
     pub empty_footer_id: Option<String>,      // ID for empty footer
+    pub page_num_start: Option<u32>,          // Page number start for the final section
+}
+
+impl Default for DocumentXml {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DocumentXml {
@@ -1133,6 +1164,7 @@ impl DocumentXml {
             header_footer_refs: HeaderFooterRefs::default(),
             empty_header_id: None,
             empty_footer_id: None,
+            page_num_start: None,
         }
     }
 
@@ -1344,19 +1376,19 @@ impl DocumentXml {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(e)) => {
-                    let name = std::str::from_utf8(e.name().into_inner().as_ref()).unwrap_or("");
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
                     if name != "wrapper" {
                         writer.write_event(Event::Start(e.to_owned()))?;
                     }
                 }
                 Ok(Event::End(e)) => {
-                    let name = std::str::from_utf8(e.name().into_inner().as_ref()).unwrap_or("");
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
                     if name != "wrapper" {
                         writer.write_event(Event::End(e.to_owned()))?;
                     }
                 }
                 Ok(Event::Empty(e)) => {
-                    let name = std::str::from_utf8(e.name().into_inner().as_ref()).unwrap_or("");
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
                     if name != "wrapper" {
                         writer.write_event(Event::Empty(e.to_owned()))?;
                     }
@@ -1454,6 +1486,13 @@ impl DocumentXml {
                 footer_ref.push_attribute(("r:id", id.as_str()));
                 writer.write_event(Event::Empty(footer_ref))?;
             }
+        }
+
+        // Page numbering (restart at specific number if set)
+        if let Some(start) = self.page_num_start {
+            let mut pg_num = BytesStart::new("w:pgNumType");
+            pg_num.push_attribute(("w:start", start.to_string().as_str()));
+            writer.write_event(Event::Empty(pg_num))?;
         }
 
         // Page size

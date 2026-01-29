@@ -20,6 +20,9 @@ pub mod i18n;
 pub mod parser;
 pub mod template;
 
+#[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
+pub mod project;
+
 pub use docx::ooxml::{FooterConfig, HeaderConfig, HeaderFooterField};
 pub use docx::toc::TocConfig;
 pub use docx::{DocumentConfig, DocumentMeta};
@@ -348,54 +351,91 @@ pub fn markdown_to_docx_with_templates(
                 image_template,
             )?;
         }
+    }
 
-        // Ensure Chapter 1 starts at page 1
-        // Find the first Heading 1
-        let mut chapter1_index = None;
-        for (i, elem) in build_result.document.elements.iter().enumerate() {
-            if let crate::docx::ooxml::DocElement::Paragraph(p) = elem {
-                if p.style_id.as_deref() == Some("Heading1") {
-                    chapter1_index = Some(i);
+    // Insert TOC if enabled
+    if let Some(toc_builder) = build_result.toc_builder.take() {
+        if doc_config.toc.enabled && !toc_builder.is_empty() {
+            let toc_elements = toc_builder.generate_toc(&doc_config.toc);
+
+            // Determine insertion position
+            let mut has_cover = false;
+            if let Some(t) = templates {
+                if t.cover.is_some() {
+                    has_cover = true;
+                }
+            }
+
+            if has_cover {
+                // Find the section break after cover (should be at index 1)
+                if build_result.document.elements.len() > 1 {
+                    if let crate::docx::ooxml::DocElement::Paragraph(p) =
+                        &mut build_result.document.elements[1]
+                    {
+                        if p.is_section_break() {
+                            // Change section break to page break to keep TOC in same section as cover
+                            *p = Box::new(crate::docx::ooxml::Paragraph::new().page_break());
+                        }
+                    }
+                }
+
+                // Insert TOC elements after the page break
+                for (i, elem) in toc_elements.into_iter().enumerate() {
+                    build_result.document.elements.insert(2 + i, elem);
+                }
+            } else {
+                // No cover, insert at the beginning
+                for (i, elem) in toc_elements.into_iter().enumerate() {
+                    build_result.document.elements.insert(i, elem);
+                }
+            }
+        }
+    }
+
+    // Ensure Chapter 1 starts at page 1
+    // Find the first Heading 1 (start of Chapter 1)
+    let mut chapter1_index = None;
+    for (i, elem) in build_result.document.elements.iter().enumerate() {
+        if let crate::docx::ooxml::DocElement::Paragraph(p) = elem {
+            if p.style_id.as_deref() == Some("Heading1") {
+                chapter1_index = Some(i);
+                break;
+            }
+        }
+    }
+
+    if let Some(idx) = chapter1_index {
+        // We found Chapter 1. Now we need to set page numbering restart on the section properties
+        // that apply to Chapter 1.
+        // In DOCX, section properties are defined at the END of the section (in a section break),
+        // or at the end of the document (w:sectPr) for the final section.
+
+        // Look for the next section break after Chapter 1 start
+        let mut found_next_break = false;
+        for i in (idx + 1)..build_result.document.elements.len() {
+            if let crate::docx::ooxml::DocElement::Paragraph(p) =
+                &mut build_result.document.elements[i]
+            {
+                if p.is_section_break() {
+                    // Found the section break that ends Chapter 1 (and defines its properties)
+                    p.page_num_start = Some(1);
+                    found_next_break = true;
                     break;
                 }
             }
         }
 
-        if let Some(idx) = chapter1_index {
-            // Check if there is a section break immediately before it
-            let needs_break = if idx > 0 {
-                if let crate::docx::ooxml::DocElement::Paragraph(p) =
-                    &build_result.document.elements[idx - 1]
-                {
-                    !p.is_section_break()
-                } else {
-                    true
-                }
-            } else {
-                true
-            };
-
-            if needs_break {
-                // Insert a section break before Chapter 1
-                let mut section_break =
-                    crate::docx::ooxml::Paragraph::new().section_break("nextPage");
-
-                // Restart page numbering at 1
-                section_break.page_num_start = Some(1);
-
-                build_result.document.elements.insert(
-                    idx,
-                    crate::docx::ooxml::DocElement::Paragraph(Box::new(section_break)),
-                );
-            } else {
-                // Update existing section break
-                if let crate::docx::ooxml::DocElement::Paragraph(p) =
-                    &mut build_result.document.elements[idx - 1]
-                {
-                    p.page_num_start = Some(1);
-                }
-            }
+        // If no section break found after Chapter 1, it means Chapter 1 is the last section.
+        // Its properties are defined in the document's final sectPr.
+        if !found_next_break {
+            build_result.document.page_num_start = Some(1);
         }
+
+        // Also check if there's a section break *before* Chapter 1 (e.g. from TOC).
+        // That section break defines properties for the TOC section.
+        // We should ensure that section break DOES NOT restart numbering (or restarts at something else if needed),
+        // but typically TOC uses Roman numerals or standard numbering.
+        // The previous code was incorrectly setting page_num_start on the TOC section break.
     }
 
     // Note: Table and image templates would be applied during block processing
@@ -874,6 +914,18 @@ pub fn markdown_to_docx_with_includes(
         None,
         None,
     );
+
+    // Insert TOC if enabled
+    if let Some(toc_builder) = build_result.toc_builder.take() {
+        let toc_config = TocConfig::default();
+        if toc_config.enabled && !toc_builder.is_empty() {
+            let toc_elements = toc_builder.generate_toc(&toc_config);
+            // Prepend TOC at the beginning
+            for (i, elem) in toc_elements.into_iter().enumerate() {
+                build_result.document.elements.insert(i, elem);
+            }
+        }
+    }
 
     let buffer = Cursor::new(Vec::new());
     let mut packager = Packager::new(buffer);

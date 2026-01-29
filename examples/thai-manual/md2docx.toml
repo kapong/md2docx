@@ -15,48 +15,29 @@ page_margin_right = "25.4mm"
 [template]
 # Use directory-based template system
 dir = "template"
-file = "custom-reference.docx"  # deprecated, use only template directory, no fallback
 
 [output]
-file = "output/manual-md2docx.docx"
+file = "output/manual-md2docx-{{currenttime:%Y%m%d_%H%M%S}}.docx"
 
 [toc]
 enabled = true
 depth = 2
 title = "สารบัญ"
 
-[page_numbers]              # deprecated, it's should depend on header-footer.docx template
-enabled = true              # deprecated, it's should depend on header-footer.docx template
-skip_cover = true           # deprecated, it's should be always true
-skip_chapter_first = true   # deprecated, it's should depend on header-footer.docx template
-
 [fonts]
 default = "TH Sarabun New"
 code = "Consolas"
-base_size = 14              # for normal text. on others should be computed from this
-h1_based_color = "#000080"     #deep blue color
+normal_based_size = 14              # for normal text. on others should be computed from this
+normal_based_color = "#000000"     #black color, other should be computed from this
+h1_based_color = "#000080"     #deep blue color, other should be computed from this
+caption_based_color = "#000000"     #black color, other should be computed from this 
+caption_based_size = 12
+code_based_size = 10
 
 [code]
 theme = "light"
 show_filename = true
 show_line_numbers = false
-
-[images]                               # deprecated, it's should depend on image.docx template
-max_width = "100%"                     # deprecated, it's should depend on image.docx template
-auto_caption = true                    # deprecated, it's should depend on image.docx template
-
-# Header configuration
-[header]                              # deprecated, it's should depend on header-footer.docx template
-left = "{title}"
-center = ""
-right = "{chapter}"
-skip_cover = true           # deprecated, it's should depend on header-footer.docx template
-
-# Footer configuration
-[footer]                              # deprecated, it's should depend on header-footer.docx template
-left = ""
-center = "{page}"
-right = ""
 
 [chapters]
 pattern = "ch*_*.md"

@@ -124,6 +124,24 @@ impl PlaceholderContext {
             _ => self.custom.get(key).map(|s| s.as_str()),
         }
     }
+
+    /// Set a standard or custom field
+    pub fn set(&mut self, key: &str, value: impl Into<String>) {
+        let val = value.into();
+        match key {
+            "title" => self.title = val,
+            "subtitle" => self.subtitle = val,
+            "author" => self.author = val,
+            "date" => self.date = val,
+            "version" => self.version = val,
+            "chapter" => self.chapter = val,
+            "page" => self.page = val,
+            "total" => self.total = val,
+            _ => {
+                self.custom.insert(key.to_string(), val);
+            }
+        }
+    }
 }
 
 /// Replace placeholders in content with values from context

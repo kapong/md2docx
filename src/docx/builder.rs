@@ -24,6 +24,8 @@ use crate::Language;
 pub struct ImageContext {
     /// Map of image source path to (filename, relationship_id, data)
     pub images: Vec<ImageInfo>,
+    /// Base directory for resolving relative image paths
+    pub base_path: Option<std::path::PathBuf>,
 }
 
 /// Information about an embedded image
@@ -114,7 +116,37 @@ impl NumberingContext {
 
 impl ImageContext {
     pub fn new() -> Self {
-        Self { images: Vec::new() }
+        Self {
+            images: Vec::new(),
+            base_path: None,
+        }
+    }
+
+    /// Set the base path for resolving relative image paths
+    pub fn with_base_path(mut self, path: std::path::PathBuf) -> Self {
+        self.base_path = Some(path);
+        self
+    }
+
+    /// Resolve an image source path against the base path if set
+    fn resolve_image_path(&self, src: &str) -> String {
+        // Skip if it's a URL, absolute path, or data URI
+        if src.starts_with("http://")
+            || src.starts_with("https://")
+            || src.starts_with("/")
+            || src.starts_with("data:")
+            || std::path::Path::new(src).is_absolute()
+        {
+            return src.to_string();
+        }
+
+        // Resolve against base path if set
+        if let Some(ref base) = self.base_path {
+            let resolved = base.join(src);
+            return resolved.to_string_lossy().to_string();
+        }
+
+        src.to_string()
     }
 
     /// Add an image and return its relationship ID
@@ -130,11 +162,14 @@ impl ImageContext {
         let rel_id = rel_manager.next_id();
         let filename = self.generate_filename(src, rel_id.clone());
 
-        // Try to read actual dimensions
+        // Resolve the source path against base path
+        let resolved_src = self.resolve_image_path(src);
+
+        // Try to read actual dimensions from resolved path
         let mut actual_dims = None;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Ok(data) = std::fs::read(src) {
+            if let Ok(data) = std::fs::read(&resolved_src) {
                 actual_dims = read_image_dimensions(&data);
             }
         }
@@ -144,8 +179,8 @@ impl ImageContext {
         self.images.push(ImageInfo {
             filename: filename.clone(),
             rel_id: rel_id.clone(),
-            src: src.to_string(),
-            data: None, // Data loaded during packaging
+            src: resolved_src, // Store resolved path for later reading
+            data: None,        // Data loaded during packaging
             width_emu,
             height_emu,
         });
@@ -311,6 +346,10 @@ pub struct DocumentConfig {
     pub header_footer_template: Option<crate::template::extract::HeaderFooterTemplate>,
     /// Document metadata for placeholder replacement
     pub document_meta: Option<DocumentMeta>,
+    /// Font configuration
+    pub fonts: Option<crate::docx::ooxml::FontConfig>,
+    /// Base directory for resolving relative image paths (e.g., the markdown file's directory)
+    pub base_path: Option<std::path::PathBuf>,
 }
 
 /// Result of building a document, including tracked images, hyperlinks, footnotes, and headers/footers
@@ -373,6 +412,10 @@ pub fn build_document(
 ) -> BuildResult {
     let mut doc_xml = DocumentXml::new();
     let mut image_ctx = ImageContext::new();
+    // Set base path for image resolution if provided in config
+    if let Some(ref base) = config.base_path {
+        image_ctx.base_path = Some(base.clone());
+    }
     let mut hyperlink_ctx = HyperlinkContext::new();
     let mut numbering_ctx = NumberingContext::new();
 

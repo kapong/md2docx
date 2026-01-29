@@ -3,6 +3,7 @@
 //! This module defines the structure of `md2docx.toml` configuration files
 //! and provides methods to load and parse them.
 
+use chrono::{Datelike, Timelike};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -14,19 +15,15 @@ pub struct ProjectConfig {
     pub template: TemplateSection,
     pub output: OutputSection,
     pub toc: TocSection,
-    pub page_numbers: PageNumbersSection,
     pub fonts: FontsSection,
     pub code: CodeSection,
-    pub images: ImagesSection,
     pub chapters: ChaptersSection,
     pub appendices: AppendicesSection,
-    pub header: HeaderSection,
-    pub footer: FooterSection,
     pub cover: CoverSection,
 }
 
 /// Document metadata section
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct DocumentSection {
     pub title: String,
@@ -34,14 +31,38 @@ pub struct DocumentSection {
     pub author: String,
     pub date: String,     // "auto" or specific date
     pub language: String, // "en" or "th"
+    pub version: String,
+    pub page_width: String,
+    pub page_height: String,
+    pub page_margin_top: String,
+    pub page_margin_bottom: String,
+    pub page_margin_left: String,
+    pub page_margin_right: String,
+}
+
+impl Default for DocumentSection {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            subtitle: String::new(),
+            author: String::new(),
+            date: String::new(),
+            language: String::new(),
+            version: String::new(),
+            page_width: "210mm".to_string(),
+            page_height: "297mm".to_string(),
+            page_margin_top: "25.4mm".to_string(),
+            page_margin_bottom: "25.4mm".to_string(),
+            page_margin_left: "25.4mm".to_string(),
+            page_margin_right: "25.4mm".to_string(),
+        }
+    }
 }
 
 /// Template configuration section
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct TemplateSection {
-    /// Single template file (legacy)
-    pub file: Option<PathBuf>,
     /// Template directory containing cover.docx, table.docx, etc.
     pub dir: Option<PathBuf>,
     /// Validate template has required styles
@@ -53,6 +74,106 @@ pub struct TemplateSection {
 #[serde(default)]
 pub struct OutputSection {
     pub file: Option<PathBuf>,
+}
+
+impl OutputSection {
+    /// Resolve filename by expanding placeholders like {{currenttime:FORMAT}}, {{title}}, {{author}}, etc.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn resolve_filename(&self, project_config: Option<&ProjectConfig>) -> Option<PathBuf> {
+        self.file.as_ref().map(|p| {
+            let path_str = p.to_string_lossy();
+            let mut result = path_str.to_string();
+
+            // Expand {{currenttime:FORMAT}} placeholders
+            if result.contains("{{currenttime:") {
+                result = expand_currenttime_placeholder(&result);
+            }
+
+            // Expand document variable placeholders if project_config is provided
+            if let Some(config) = project_config {
+                result = expand_document_placeholders(&result, &config.document);
+            }
+
+            PathBuf::from(result)
+        })
+    }
+}
+
+/// Expand {{currenttime:FORMAT}} to actual timestamp using LOCAL device time
+/// Supports native chrono format strings (e.g., "%Y%m%d_%H%M%S")
+#[cfg(not(target_arch = "wasm32"))]
+fn expand_currenttime_placeholder(template: &str) -> String {
+    use chrono::Local;
+
+    let now = Local::now();
+
+    let mut result = template.to_string();
+    while let Some(start) = result.find("{{currenttime:") {
+        if let Some(end) = result[start..].find("}}") {
+            let full_placeholder = &result[start..start + end + 2];
+            let format_str = &result[start + 14..start + end];
+
+            // Use chrono's native strftime formatting
+            let formatted = now.format(format_str).to_string();
+
+            result = result.replace(full_placeholder, &formatted);
+        } else {
+            break;
+        }
+    }
+    result
+}
+
+/// Expand document variable placeholders like {{title}}, {{author}}, {{version}}, etc.
+#[cfg(not(target_arch = "wasm32"))]
+fn expand_document_placeholders(template: &str, document: &DocumentSection) -> String {
+    let mut result = template.to_string();
+
+    // Define all available placeholders and their values
+    let placeholders = [
+        ("{{title}}", sanitize_filename(&document.title)),
+        ("{{author}}", sanitize_filename(&document.author)),
+        ("{{version}}", sanitize_filename(&document.version)),
+        ("{{subtitle}}", sanitize_filename(&document.subtitle)),
+        ("{{language}}", document.language.clone()),
+        ("{{date}}", sanitize_filename(&document.date)),
+    ];
+
+    for (placeholder, value) in &placeholders {
+        result = result.replace(placeholder, value);
+    }
+
+    result
+}
+
+/// Sanitize a string to be safe for use in filenames
+/// Removes or replaces characters that are invalid in filenames
+#[cfg(not(target_arch = "wasm32"))]
+fn sanitize_filename(input: &str) -> String {
+    if input.is_empty() {
+        return "unknown".to_string();
+    }
+
+    // Characters that are invalid in Windows filenames
+    let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
+    let mut result: String = input
+        .chars()
+        .map(|c| if invalid_chars.contains(&c) { '_' } else { c })
+        .collect();
+
+    // Trim whitespace and limit length
+    result = result.trim().to_string();
+    if result.len() > 100 {
+        result = result[..100].to_string();
+    }
+
+    // If empty after sanitization, return "unknown"
+    if result.is_empty() {
+        result = "unknown".to_string();
+    }
+
+    result
 }
 
 /// Table of contents configuration section
@@ -76,34 +197,33 @@ impl Default for TocSection {
     }
 }
 
-/// Page numbering configuration section
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct PageNumbersSection {
-    pub enabled: bool,
-    pub skip_cover: bool,
-    pub skip_chapter_first: bool,
-    pub format: String,
-}
-
-impl Default for PageNumbersSection {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            skip_cover: true,
-            skip_chapter_first: false,
-            format: "{n}".to_string(),
-        }
-    }
-}
-
 /// Font configuration section
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct FontsSection {
     pub default: String,
-    pub thai: String,
     pub code: String,
+    pub normal_based_size: u32,
+    pub normal_based_color: String,
+    pub h1_based_color: String,
+    pub caption_based_size: u32,
+    pub caption_based_color: String,
+    pub code_based_size: u32,
+}
+
+impl Default for FontsSection {
+    fn default() -> Self {
+        Self {
+            default: String::new(),
+            code: String::new(),
+            normal_based_size: 11,
+            normal_based_color: "#000000".to_string(),
+            h1_based_color: "#2F5496".to_string(),
+            caption_based_size: 9,
+            caption_based_color: "#000000".to_string(),
+            code_based_size: 10,
+        }
+    }
 }
 
 /// Code block configuration section
@@ -123,25 +243,6 @@ impl Default for CodeSection {
             show_filename: true,
             show_line_numbers: false,
             source_root: None,
-        }
-    }
-}
-
-/// Image configuration section
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct ImagesSection {
-    pub max_width: String,
-    pub auto_caption: bool,
-    pub default_dpi: u32,
-}
-
-impl Default for ImagesSection {
-    fn default() -> Self {
-        Self {
-            max_width: "100%".to_string(),
-            auto_caption: true,
-            default_dpi: 150,
         }
     }
 }
@@ -178,25 +279,6 @@ impl Default for AppendicesSection {
             prefix: "Appendix".to_string(),
         }
     }
-}
-
-/// Header configuration section
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
-pub struct HeaderSection {
-    pub left: String,
-    pub center: String,
-    pub right: String,
-    pub skip_cover: bool,
-}
-
-/// Footer configuration section
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
-pub struct FooterSection {
-    pub left: String,
-    pub center: String,
-    pub right: String,
 }
 
 /// Cover page configuration section
@@ -243,24 +325,8 @@ impl ProjectConfig {
     #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
     pub fn date(&self) -> String {
         if self.document.date == "auto" {
-            // Return current date in ISO format
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let duration = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default();
-            let secs = duration.as_secs();
-            // Simple date calculation from Unix timestamp
-            let days_since_epoch = secs / 86400;
-            // Unix epoch 1970-01-01 was a Thursday (day 4)
-            let year = 1970 + (days_since_epoch / 365);
-            let remaining_days = days_since_epoch % 365;
-            // Approximate month/day (simplified)
-            format!(
-                "{}-{:02}-{:02}",
-                year,
-                1 + (remaining_days / 30) % 12,
-                1 + remaining_days % 30
-            )
+            // Use expand_currenttime_placeholder to get YYYY-MM-DD
+            expand_currenttime_placeholder("{{currenttime:YYYY-MM-DD}}")
         } else {
             self.document.date.clone()
         }
@@ -274,31 +340,33 @@ mod tests {
     #[test]
     #[cfg(feature = "cli")]
     fn test_parse_minimal_config() {
-        let toml = r#"
+        let toml = r##"
 [document]
 title = "Test Document"
-"#;
+"##;
 
         let config = ProjectConfig::parse_toml(toml).unwrap();
         assert_eq!(config.document.title, "Test Document");
         assert_eq!(config.document.language, ""); // Default empty
         assert_eq!(config.toc.enabled, false); // Default
-        assert_eq!(config.page_numbers.enabled, true); // Default
     }
 
     #[test]
     #[cfg(feature = "cli")]
     fn test_parse_full_config() {
-        let toml = r#"
+        let toml = r##"
 [document]
 title = "คู่มือการใช้งาน"
 subtitle = "แปลง Markdown เป็น DOCX"
 author = "ทีมพัฒนา"
 date = "auto"
 language = "th"
+version = "1.0.0"
+page_width = "210mm"
+page_height = "297mm"
 
 [template]
-file = "custom-reference.docx"
+dir = "template"
 validate = true
 
 [output]
@@ -307,28 +375,19 @@ file = "output/manual.docx"
 [toc]
 enabled = true
 depth = 3
-
-[page_numbers]
-enabled = true
-skip_cover = true
-skip_chapter_first = false
-format = "{n} of {total}"
+title = "สารบัญ"
 
 [fonts]
 default = "TH Sarabun New"
-thai = "TH Sarabun New"
 code = "Consolas"
+normal_based_size = 14
+h1_based_color = "#000080"
 
 [code]
 theme = "light"
 show_filename = true
 show_line_numbers = false
 source_root = "../src"
-
-[images]
-max_width = "100%"
-auto_caption = true
-default_dpi = 150
 
 [chapters]
 pattern = "ch*_*.md"
@@ -338,23 +397,12 @@ sort = "numeric"
 pattern = "ap*_*.md"
 prefix = "Appendix"
 
-[header]
-left = "{title}"
-center = ""
-right = "{chapter}"
-skip_cover = true
-
-[footer]
-left = ""
-center = "{page}"
-right = ""
-
 [cover]
 file = "cover.md"
 title = "Custom Title"
 subtitle = "Custom Subtitle"
 date = "2025-01-28"
-"#;
+"##;
 
         let config = ProjectConfig::parse_toml(toml).unwrap();
 
@@ -364,12 +412,11 @@ date = "2025-01-28"
         assert_eq!(config.document.author, "ทีมพัฒนา");
         assert_eq!(config.document.date, "auto");
         assert_eq!(config.document.language, "th");
+        assert_eq!(config.document.version, "1.0.0");
+        assert_eq!(config.document.page_width, "210mm");
 
         // Template section
-        assert_eq!(
-            config.template.file,
-            Some(PathBuf::from("custom-reference.docx"))
-        );
+        assert_eq!(config.template.dir, Some(PathBuf::from("template")));
         assert_eq!(config.template.validate, true);
 
         // Output section
@@ -381,28 +428,19 @@ date = "2025-01-28"
         // TOC section
         assert_eq!(config.toc.enabled, true);
         assert_eq!(config.toc.depth, 3);
-
-        // Page numbers section
-        assert_eq!(config.page_numbers.enabled, true);
-        assert_eq!(config.page_numbers.skip_cover, true);
-        assert_eq!(config.page_numbers.skip_chapter_first, false);
-        assert_eq!(config.page_numbers.format, "{n} of {total}");
+        assert_eq!(config.toc.title, "สารบัญ");
 
         // Fonts section
         assert_eq!(config.fonts.default, "TH Sarabun New");
-        assert_eq!(config.fonts.thai, "TH Sarabun New");
         assert_eq!(config.fonts.code, "Consolas");
+        assert_eq!(config.fonts.normal_based_size, 14);
+        assert_eq!(config.fonts.h1_based_color, "#000080");
 
         // Code section
         assert_eq!(config.code.theme, "light");
         assert_eq!(config.code.show_filename, true);
         assert_eq!(config.code.show_line_numbers, false);
         assert_eq!(config.code.source_root, Some(PathBuf::from("../src")));
-
-        // Images section
-        assert_eq!(config.images.max_width, "100%");
-        assert_eq!(config.images.auto_caption, true);
-        assert_eq!(config.images.default_dpi, 150);
 
         // Chapters section
         assert_eq!(config.chapters.pattern, "ch*_*.md");
@@ -411,17 +449,6 @@ date = "2025-01-28"
         // Appendices section
         assert_eq!(config.appendices.pattern, "ap*_*.md");
         assert_eq!(config.appendices.prefix, "Appendix");
-
-        // Header section
-        assert_eq!(config.header.left, "{title}");
-        assert_eq!(config.header.center, "");
-        assert_eq!(config.header.right, "{chapter}");
-        assert_eq!(config.header.skip_cover, true);
-
-        // Footer section
-        assert_eq!(config.footer.left, "");
-        assert_eq!(config.footer.center, "{page}");
-        assert_eq!(config.footer.right, "");
 
         // Cover section
         assert_eq!(config.cover.file, Some(PathBuf::from("cover.md")));
@@ -433,7 +460,7 @@ date = "2025-01-28"
     #[test]
     #[cfg(feature = "cli")]
     fn test_parse_thai_example_config() {
-        let toml = r#"
+        let toml = r##"
 [document]
 title = "คู่มือการใช้งาน md2docx"
 subtitle = "แปลง Markdown เป็น DOCX อย่างมืออาชีพ"
@@ -442,7 +469,7 @@ date = "auto"
 language = "th"
 
 [template]
-file = "custom-reference.docx"
+dir = "template"
 
 [output]
 file = "output/คู่มือ-md2docx.docx"
@@ -450,10 +477,6 @@ file = "output/คู่มือ-md2docx.docx"
 [toc]
 enabled = true
 depth = 3
-
-[page_numbers]
-enabled = true
-skip_cover = true
 
 [fonts]
 default = "TH Sarabun New"
@@ -464,17 +487,13 @@ theme = "light"
 show_filename = true
 show_line_numbers = false
 
-[images]
-max_width = "100%"
-auto_caption = true
-
 [chapters]
 pattern = "ch*_*.md"
 sort = "numeric"
 
 [appendices]
 pattern = "ap*_*.md"
-"#;
+"##;
 
         let config = ProjectConfig::parse_toml(toml).unwrap();
 
@@ -498,8 +517,9 @@ pattern = "ap*_*.md"
         assert_eq!(config.document.author, "");
         assert_eq!(config.document.date, "");
         assert_eq!(config.document.language, "");
+        assert_eq!(config.document.page_width, "210mm");
 
-        assert_eq!(config.template.file, None);
+        assert_eq!(config.template.dir, None);
         assert_eq!(config.template.validate, false);
 
         assert_eq!(config.output.file, None);
@@ -509,38 +529,20 @@ pattern = "ap*_*.md"
         assert_eq!(config.toc.title, "Table of Contents".to_string());
         assert_eq!(config.toc.after_cover, true);
 
-        assert_eq!(config.page_numbers.enabled, true);
-        assert_eq!(config.page_numbers.skip_cover, true);
-        assert_eq!(config.page_numbers.skip_chapter_first, false);
-        assert_eq!(config.page_numbers.format, "{n}");
-
         assert_eq!(config.fonts.default, "");
-        assert_eq!(config.fonts.thai, "");
         assert_eq!(config.fonts.code, "");
+        assert_eq!(config.fonts.normal_based_size, 11);
 
         assert_eq!(config.code.theme, "light");
         assert_eq!(config.code.show_filename, true);
         assert_eq!(config.code.show_line_numbers, false);
         assert_eq!(config.code.source_root, None);
 
-        assert_eq!(config.images.max_width, "100%");
-        assert_eq!(config.images.auto_caption, true);
-        assert_eq!(config.images.default_dpi, 150);
-
         assert_eq!(config.chapters.pattern, "ch*_*.md");
         assert_eq!(config.chapters.sort, "numeric");
 
         assert_eq!(config.appendices.pattern, "ap*_*.md");
         assert_eq!(config.appendices.prefix, "Appendix");
-
-        assert_eq!(config.header.left, "");
-        assert_eq!(config.header.center, "");
-        assert_eq!(config.header.right, "");
-        assert_eq!(config.header.skip_cover, false);
-
-        assert_eq!(config.footer.left, "");
-        assert_eq!(config.footer.center, "");
-        assert_eq!(config.footer.right, "");
 
         assert_eq!(config.cover.file, None);
         assert_eq!(config.cover.title, None);
@@ -616,22 +618,45 @@ title = "Missing closing bracket"
     }
 
     #[test]
-    #[cfg(feature = "cli")]
-    fn test_partial_config() {
-        let toml = r#"
-[document]
-title = "Partial Config"
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
+    fn test_resolve_filename() {
+        let mut output = OutputSection::default();
+        output.file = Some(PathBuf::from("output-{{currenttime:YYYYMMDD}}.docx"));
 
-[toc]
-enabled = true
-"#;
+        let resolved = output.resolve_filename(None).unwrap();
+        let resolved_str = resolved.to_string_lossy();
 
-        let config = ProjectConfig::parse_toml(toml).unwrap();
+        assert!(resolved_str.starts_with("output-"));
+        assert!(resolved_str.ends_with(".docx"));
+        assert_eq!(resolved_str.len(), "output-20250101.docx".len());
+    }
 
-        assert_eq!(config.document.title, "Partial Config");
-        assert_eq!(config.toc.enabled, true);
-        // Other sections should have defaults
-        assert_eq!(config.page_numbers.enabled, true);
-        assert_eq!(config.code.theme, "light");
+    #[test]
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
+    fn test_resolve_filename_with_document_vars() {
+        use super::{DocumentSection, ProjectConfig};
+
+        let mut project_config = ProjectConfig::default();
+        project_config.document.title = "My Document".to_string();
+        project_config.document.author = "John Doe".to_string();
+        project_config.document.version = "1.2.3".to_string();
+
+        let mut output = OutputSection::default();
+        output.file = Some(PathBuf::from("{{title}}-v{{version}}-{{author}}.docx"));
+
+        let resolved = output.resolve_filename(Some(&project_config)).unwrap();
+        let resolved_str = resolved.to_string_lossy();
+
+        assert_eq!(resolved_str, "My Document-v1.2.3-John Doe.docx");
+    }
+
+    #[test]
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
+    fn test_sanitize_filename() {
+        assert_eq!(sanitize_filename("Hello World"), "Hello World");
+        assert_eq!(sanitize_filename("Test: File"), "Test_ File");
+        assert_eq!(sanitize_filename("File/Path"), "File_Path");
+        assert_eq!(sanitize_filename(""), "unknown");
+        assert_eq!(sanitize_filename("   "), "unknown");
     }
 }

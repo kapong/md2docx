@@ -11,7 +11,10 @@ pub use builder::{
     build_document, BuildResult, DocumentConfig, DocumentMeta, HyperlinkContext, HyperlinkInfo,
     ImageContext, ImageInfo,
 };
-pub use ooxml::*;
+pub use ooxml::{
+    generate_numbering_xml_with_context, ContentTypes, DocumentXml, FontConfig, FootnotesXml,
+    Language, Paragraph, Relationships, Run, StylesDocument,
+};
 pub use packager::*;
 pub use rels_manager::RelIdManager;
 pub use template::*;

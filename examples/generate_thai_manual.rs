@@ -129,6 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|t| t.has_cover())
         .unwrap_or(false);
 
+    // Track the directory of the first non-cover markdown file for image resolution
+    let mut first_content_file_dir: Option<std::path::PathBuf> = None;
+
     for (_i, file_path) in files.iter().enumerate() {
         let file_name = file_path
             .file_name()
@@ -146,30 +149,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("📖 Reading: {}", file_name);
 
+        // Track the directory of the first content file for image resolution
+        if first_content_file_dir.is_none() {
+            if let Some(parent) = file_path.parent() {
+                first_content_file_dir = Some(parent.to_path_buf());
+            }
+        }
+
         let content = fs::read_to_string(file_path)?;
 
         // Strip frontmatter from each file
         let content_without_frontmatter = strip_frontmatter(&content);
-
-        // Fix image paths to be relative to project root
-        let content_with_fixed_paths = if let Some(parent) = file_path.parent() {
-            match parent.strip_prefix(base_dir) {
-                Ok(relative_path) if !relative_path.as_os_str().is_empty() => {
-                    let prefix = format!("examples/thai-manual/{}/", relative_path.display());
-                    content_without_frontmatter.replace("assets/", &format!("{}assets/", prefix))
-                }
-                _ => content_without_frontmatter,
-            }
-        } else {
-            content_without_frontmatter
-        };
 
         // Add page break between chapters (except before first)
         if !combined_markdown.is_empty() {
             combined_markdown.push_str("\n\n---\n\n");
         }
 
-        combined_markdown.push_str(&content_with_fixed_paths);
+        combined_markdown.push_str(&content_without_frontmatter);
     }
 
     // Determine language from config
@@ -180,32 +177,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Build header config from project config
-    let header_config = if project_config.header.left.is_empty()
-        && project_config.header.center.is_empty()
-        && project_config.header.right.is_empty()
-    {
-        HeaderConfig::default()
-    } else {
-        HeaderConfig {
-            left: parse_header_footer_field(&project_config.header.left),
-            center: parse_header_footer_field(&project_config.header.center),
-            right: parse_header_footer_field(&project_config.header.right),
-        }
-    };
+    // ProjectConfig no longer has explicit header/footer sections in the schema
+    // so we use defaults or build from other config if needed.
+    // For this example, we'll use defaults.
+    let header_config = HeaderConfig::default();
+    let footer_config = FooterConfig::default();
 
-    // Build footer config from project config
-    let footer_config = if project_config.footer.left.is_empty()
-        && project_config.footer.center.is_empty()
-        && project_config.footer.right.is_empty()
-    {
-        FooterConfig::default()
-    } else {
-        FooterConfig {
-            left: parse_header_footer_field(&project_config.footer.left),
-            center: parse_header_footer_field(&project_config.footer.center),
-            right: parse_header_footer_field(&project_config.footer.right),
-        }
-    };
+    // Map FontsSection to FontConfig
+    // Note: Font sizes are in half-points (multiply pt by 2 for OOXML)
+    let font_config = Some(md2docx::docx::ooxml::FontConfig {
+        default: if project_config.fonts.default.is_empty() {
+            None
+        } else {
+            Some(project_config.fonts.default.clone())
+        },
+        code: if project_config.fonts.code.is_empty() {
+            None
+        } else {
+            Some(project_config.fonts.code.clone())
+        },
+        normal_size: Some(project_config.fonts.normal_based_size * 2),
+        normal_color: Some(project_config.fonts.normal_based_color.clone()),
+        h1_color: Some(project_config.fonts.h1_based_color.clone()),
+        caption_size: Some(project_config.fonts.caption_based_size * 2),
+        caption_color: Some(project_config.fonts.caption_based_color.clone()),
+        code_size: Some(project_config.fonts.code_based_size * 2),
+    });
 
     // Build document config from project config
     let doc_config = DocumentConfig {
@@ -225,7 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         header: header_config,
         footer: footer_config,
-        different_first_page: project_config.page_numbers.skip_chapter_first,
+        different_first_page: false, // Default to false as page_numbers section was removed
         template_dir: project_config
             .template
             .dir
@@ -241,6 +238,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             author: project_config.document.author.clone(),
             date: project_config.date(),
         }),
+        fonts: font_config,
+        // Set base path for resolving relative image paths
+        base_path: first_content_file_dir,
     };
 
     // Extract inside content from cover.md (content after frontmatter)
@@ -289,8 +289,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Determine output path from config or use default
-    let output_path = if let Some(output_file) = &project_config.output.file {
-        base_dir.join(output_file)
+    // Use resolve_filename to expand placeholders like {{currenttime:...}} and {{title}}
+    let output_path = if let Some(resolved) = project_config
+        .output
+        .resolve_filename(Some(&project_config))
+    {
+        base_dir.join(resolved)
     } else {
         base_dir.join("output/manual.docx")
     };

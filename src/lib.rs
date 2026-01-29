@@ -162,7 +162,7 @@ impl Document {
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
-        let styles = StylesDocument::new(self.lang);
+        let styles = StylesDocument::new(self.lang, None);
 
         // Package
         packager.package(
@@ -316,7 +316,7 @@ pub fn markdown_to_docx_with_config(
 pub fn markdown_to_docx_with_templates(
     markdown: &str,
     lang: Language,
-    config: &DocumentConfig,
+    doc_config: &DocumentConfig,
     templates: Option<&crate::template::TemplateSet>,
     placeholder_ctx: &crate::template::PlaceholderContext,
 ) -> Result<Vec<u8>> {
@@ -328,7 +328,7 @@ pub fn markdown_to_docx_with_templates(
     let mut build_result = build_document(
         &parsed,
         lang,
-        config,
+        doc_config,
         &mut rel_manager,
         table_template,
         image_template,
@@ -408,7 +408,7 @@ pub fn markdown_to_docx_with_templates(
     let mut content_types = ContentTypes::new();
     let rels = Relationships::root_rels();
     let mut doc_rels = Relationships::document_rels();
-    let styles = StylesDocument::new(lang);
+    let styles = StylesDocument::new(lang, doc_config.fonts.clone());
 
     // Process images
     for image in &build_result.images.images {
@@ -881,7 +881,7 @@ pub fn markdown_to_docx_with_includes(
     let mut content_types = ContentTypes::new();
     let rels = Relationships::root_rels();
     let mut doc_rels = Relationships::document_rels();
-    let styles = StylesDocument::new(lang);
+    let styles = StylesDocument::new(lang, None);
 
     // Process images
     for image in &build_result.images.images {
@@ -1370,7 +1370,7 @@ mod tests {
         let mut content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let mut doc_rels = Relationships::document_rels();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
 
         // Add header/footer content types (header1, footer1)
         content_types.add_header(1);

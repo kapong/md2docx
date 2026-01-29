@@ -6,6 +6,22 @@ use std::io::Cursor;
 
 use crate::error::Result;
 
+/// kompleks script size in half-points (14pt = 28)
+pub const DEFAULT_THAI_SIZE: u32 = 28;
+
+/// Font configuration
+#[derive(Debug, Clone, Default)]
+pub struct FontConfig {
+    pub default: Option<String>,
+    pub code: Option<String>,
+    pub normal_size: Option<u32>,
+    pub normal_color: Option<String>,
+    pub h1_color: Option<String>,
+    pub caption_size: Option<u32>,
+    pub caption_color: Option<String>,
+    pub code_size: Option<u32>,
+}
+
 /// Language setting for default fonts
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Language {
@@ -282,31 +298,114 @@ impl Style {
 pub struct StylesDocument {
     styles: Vec<Style>,
     lang: Language,
+    font_config: Option<FontConfig>,
 }
 
 impl StylesDocument {
-    pub fn new(lang: Language) -> Self {
+    pub fn new(lang: Language, font_config: Option<FontConfig>) -> Self {
         let mut doc = Self {
             styles: Vec::new(),
             lang,
+            font_config,
         };
         doc.add_default_styles();
         doc
     }
 
+    fn get_ascii_font(&self) -> String {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.default.as_ref())
+            .cloned()
+            .unwrap_or_else(|| self.lang.default_ascii_font().to_string())
+    }
+
+    fn get_code_font(&self) -> String {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.code.as_ref())
+            .cloned()
+            .unwrap_or_else(|| "Consolas".to_string())
+    }
+
+    fn get_normal_size(&self) -> u32 {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.normal_size)
+            .unwrap_or(self.lang.default_font_size())
+    }
+
+    fn get_normal_color(&self) -> String {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.normal_color.as_ref())
+            .map(|s| s.trim_start_matches('#').to_string())
+            .unwrap_or_else(|| "000000".to_string())
+    }
+
+    fn get_h1_color(&self) -> String {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.h1_color.as_ref())
+            .map(|s| s.trim_start_matches('#').to_string())
+            .unwrap_or_else(|| "2F5496".to_string())
+    }
+
+    fn get_caption_size(&self) -> u32 {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.caption_size)
+            .unwrap_or_else(|| match self.lang {
+                Language::English => 18, // 9pt
+                Language::Thai => 24,    // 12pt
+            })
+    }
+
+    fn get_caption_color(&self) -> String {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.caption_color.as_ref())
+            .map(|s| s.trim_start_matches('#').to_string())
+            .unwrap_or_else(|| "000000".to_string())
+    }
+
+    fn get_code_size(&self) -> u32 {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.code_size)
+            .unwrap_or(20) // 10pt
+    }
+
+    /// Add a style to the document
+    pub fn add_style(&mut self, style: Style) {
+        self.styles.push(style);
+    }
+
     /// Add all required styles
     fn add_default_styles(&mut self) {
+        let ascii_font = self.get_ascii_font();
+        let code_font = self.get_code_font();
+        let normal_size = self.get_normal_size();
+        let normal_color = self.get_normal_color();
+        let h1_color = self.get_h1_color();
+        let caption_size = self.get_caption_size();
+        let caption_color = self.get_caption_color();
+        let code_size = self.get_code_size();
+
+        // Helper to determine Thai size
+        // If we are in Thai mode, we use the normal_size (which might be larger by default or config)
+        // We enforce a minimum only if using defaults, but here normal_size is already resolved.
+        // So we just use normal_size.
+        let normal_size_cs = normal_size;
+
         // Normal style (base for all paragraph styles)
         self.add_style(
             Style::new("Normal", "Normal", StyleType::Paragraph)
                 .ui_priority(0)
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
+                .color(&normal_color)
                 .spacing(0, 0), // 0 before, 0pt after
         );
 
@@ -320,14 +419,22 @@ impl StylesDocument {
 
         // Title style (cover page title)
         let (title_font, title_size, title_cs_size) = match self.lang {
-            Language::English => ("Calibri Light", 56, 56), // 28pt
-            Language::Thai => ("TH Sarabun New", 72, 72),   // 36pt
+            Language::English => (
+                format!("{} Light", ascii_font),
+                normal_size * 2 + 14,
+                normal_size * 2 + 14,
+            ),
+            Language::Thai => (
+                self.lang.default_cs_font().to_string(),
+                normal_size + 44, // Relative to normal (e.g. 28 + 44 = 72)
+                normal_size + 44,
+            ),
         };
         self.add_style(
             Style::new("Title", "Title", StyleType::Paragraph)
                 .ui_priority(10)
                 .based_on("Normal")
-                .font(title_font, title_font, self.lang.default_cs_font())
+                .font(&title_font, &title_font, self.lang.default_cs_font())
                 .size(title_size)
                 .size_cs(title_cs_size)
                 .bold()
@@ -335,97 +442,121 @@ impl StylesDocument {
         );
 
         // Subtitle style (cover page subtitle)
-        let (subtitle_size, subtitle_cs_size) = match self.lang {
-            Language::English => (28, 28), // 14pt
-            Language::Thai => (36, 36),    // 18pt
-        };
+        let subtitle_size = normal_size + 6; // 14pt if 11pt
         self.add_style(
             Style::new("Subtitle", "Subtitle", StyleType::Paragraph)
                 .ui_priority(11)
                 .based_on("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
                 .size(subtitle_size)
-                .size_cs(subtitle_cs_size)
+                .size_cs(subtitle_size)
                 .italic()
                 .spacing(120, 240), // 6pt before, 12pt after
         );
 
         // Heading1 style
         let (h1_font, h1_size, h1_cs_size) = match self.lang {
-            Language::English => ("Calibri Light", 32, 40), // 16pt EN, 20pt TH
-            Language::Thai => ("TH Sarabun New", 40, 40),   // 20pt
+            Language::English => (
+                format!("{} Light", ascii_font),
+                normal_size + 10,
+                normal_size + 18,
+            ),
+            Language::Thai => (
+                self.lang.default_cs_font().to_string(),
+                normal_size + 12, // Relative: 28 + 12 = 40 (20pt)
+                normal_size + 12,
+            ),
         };
         self.add_style(
             Style::new("Heading1", "Heading 1", StyleType::Paragraph)
                 .ui_priority(9)
                 .based_on("Normal")
                 .next("Normal")
-                .font(h1_font, h1_font, self.lang.default_cs_font())
+                .font(&h1_font, &h1_font, self.lang.default_cs_font())
                 .size(h1_size)
                 .size_cs(h1_cs_size)
                 .bold()
-                .color("2F5496") // Word blue
+                .color(&h1_color) // Word blue or custom
                 .outline_level(0)
                 .spacing(480, 120), // 24pt before (like blank line), 6pt after
         );
 
         // Heading2 style
         let (h2_font, h2_size, h2_cs_size) = match self.lang {
-            Language::English => ("Calibri Light", 26, 32), // 13pt EN, 16pt TH
-            Language::Thai => ("TH Sarabun New", 32, 32),   // 16pt
+            Language::English => (
+                format!("{} Light", ascii_font),
+                normal_size + 4,
+                normal_size + 10,
+            ),
+            Language::Thai => (
+                self.lang.default_cs_font().to_string(),
+                normal_size + 4, // Relative: 28 + 4 = 32 (16pt)
+                normal_size + 4,
+            ),
         };
         self.add_style(
             Style::new("Heading2", "Heading 2", StyleType::Paragraph)
                 .ui_priority(9)
                 .based_on("Heading1")
                 .next("Normal")
-                .font(h2_font, h2_font, self.lang.default_cs_font())
+                .font(&h2_font, &h2_font, self.lang.default_cs_font())
                 .size(h2_size)
                 .size_cs(h2_cs_size)
                 .bold()
-                .color("2F5496")
+                .color(&h1_color)
                 .outline_level(1)
                 .spacing(360, 120), // 18pt before, 6pt after
         );
 
         // Heading3 style
         let (h3_font, h3_size, h3_cs_size) = match self.lang {
-            Language::English => ("Calibri Light", 24, 28), // 12pt EN, 14pt TH
-            Language::Thai => ("TH Sarabun New", 28, 28),   // 14pt
+            Language::English => (
+                format!("{} Light", ascii_font),
+                normal_size + 2,
+                normal_size + 6,
+            ),
+            Language::Thai => (
+                self.lang.default_cs_font().to_string(),
+                normal_size, // Relative: 28 (14pt)
+                normal_size,
+            ),
         };
         self.add_style(
             Style::new("Heading3", "Heading 3", StyleType::Paragraph)
                 .ui_priority(9)
                 .based_on("Heading2")
                 .next("Normal")
-                .font(h3_font, h3_font, self.lang.default_cs_font())
+                .font(&h3_font, &h3_font, self.lang.default_cs_font())
                 .size(h3_size)
                 .size_cs(h3_cs_size)
                 .bold()
-                .color("1F3763") // Darker blue
+                .color(&h1_color)
                 .outline_level(2)
                 .spacing(280, 80), // 14pt before, 4pt after
         );
 
         // Heading4 style
         let (h4_size, h4_cs_size) = match self.lang {
-            Language::English => (22, 28), // 11pt EN, 14pt TH
-            Language::Thai => (26, 26),    // 13pt
+            Language::English => (normal_size, normal_size + 6),
+            Language::Thai => (
+                if normal_size > 2 {
+                    normal_size - 2
+                } else {
+                    normal_size
+                },
+                if normal_size > 2 {
+                    normal_size - 2
+                } else {
+                    normal_size
+                },
+            ), // 26 (13pt)
         };
         self.add_style(
             Style::new("Heading4", "Heading 4", StyleType::Paragraph)
                 .ui_priority(9)
                 .based_on("Heading3")
                 .next("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
                 .size(h4_size)
                 .size_cs(h4_cs_size)
                 .italic()
@@ -439,9 +570,9 @@ impl StylesDocument {
             Style::new("Code", "Code", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font("Consolas", "Consolas", "Consolas")
-                .size(20) // 10pt
-                .size_cs(20)
+                .font(&code_font, &code_font, &code_font)
+                .size(code_size)
+                .size_cs(code_size)
                 .spacing(120, 120) // 6pt before/after
                 .contextual_spacing(true) // Merge spacing between code lines
                 .indent(240), // Left indent for the block
@@ -451,9 +582,9 @@ impl StylesDocument {
         self.add_style(
             Style::new("CodeChar", "Code Char", StyleType::Character)
                 .ui_priority(99)
-                .font("Consolas", "Consolas", "Consolas")
-                .size(20) // 10pt
-                .size_cs(20)
+                .font(&code_font, &code_font, &code_font)
+                .size(code_size)
+                .size_cs(code_size)
                 .color("D63384"), // Pinkish for code
         );
 
@@ -462,51 +593,37 @@ impl StylesDocument {
             Style::new("Quote", "Quote", StyleType::Paragraph)
                 .ui_priority(29)
                 .based_on("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .italic()
                 .spacing(120, 120) // 6pt before/after
                 .indent(720), // 0.5" indent
         );
 
         // Caption style (figure/table captions)
-        let (caption_size, caption_cs_size) = match self.lang {
-            Language::English => (18, 22), // 9pt EN, 11pt TH
-            Language::Thai => (24, 24),    // 12pt
-        };
         self.add_style(
             Style::new("Caption", "Caption", StyleType::Paragraph)
                 .ui_priority(35)
                 .based_on("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
                 .size(caption_size)
-                .size_cs(caption_cs_size)
+                .size_cs(caption_size)
+                .color(&caption_color)
                 .italic()
                 .spacing(60, 240), // 3pt before, 12pt after
         );
 
         // TOCHeading style
+        let toc_heading_size = normal_size + 6;
         self.add_style(
             Style::new("TOCHeading", "TOC Heading", StyleType::Paragraph)
                 .ui_priority(39)
                 .based_on("Heading1")
                 .next("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(28) // 14pt
-                .size_cs(28)
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(toc_heading_size)
+                .size_cs(toc_heading_size)
                 .bold()
                 .spacing(240, 60), // 12pt before, 3pt after
         );
@@ -520,13 +637,9 @@ impl StylesDocument {
                 .ui_priority(39)
                 .based_on("Normal")
                 .next("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .add_tab(TabStop::right_aligned_with_dots(TOC_TAB_POSITION))
                 .spacing(0, 100), // 0 before, 5pt after
         );
@@ -536,13 +649,9 @@ impl StylesDocument {
                 .ui_priority(39)
                 .based_on("Normal")
                 .next("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .add_tab(TabStop::right_aligned_with_dots(TOC_TAB_POSITION))
                 .spacing(0, 100) // 0 before, 5pt after
                 .indent(440), // 0.3" indent (440 twips)
@@ -553,34 +662,27 @@ impl StylesDocument {
                 .ui_priority(39)
                 .based_on("Normal")
                 .next("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .add_tab(TabStop::right_aligned_with_dots(TOC_TAB_POSITION))
                 .spacing(0, 100) // 0 before, 5pt after
                 .indent(880), // 0.6" indent (880 twips)
         );
 
         // FootnoteText style
-        let (footnote_size, footnote_cs_size) = match self.lang {
-            Language::English => (20, 20), // 10pt
-            Language::Thai => (24, 24),    // 12pt
+        let footnote_size = if normal_size > 2 {
+            normal_size - 2
+        } else {
+            normal_size
         };
         self.add_style(
             Style::new("FootnoteText", "Footnote Text", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
                 .size(footnote_size)
-                .size_cs(footnote_cs_size)
+                .size_cs(footnote_size)
                 .spacing(60, 60),
         );
 
@@ -588,13 +690,9 @@ impl StylesDocument {
         self.add_style(
             Style::new("Hyperlink", "Hyperlink", StyleType::Character)
                 .ui_priority(99)
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .color("0563C1") // Word hyperlink blue
                 .underline(),
         );
@@ -604,13 +702,9 @@ impl StylesDocument {
             Style::new("ListParagraph", "List Paragraph", StyleType::Paragraph)
                 .ui_priority(34)
                 .based_on("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .spacing(60, 60),
         );
 
@@ -620,13 +714,9 @@ impl StylesDocument {
             Style::new("Header", "header", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .add_tab(TabStop {
                     position: 4513,
                     alignment: "center".to_string(),
@@ -645,13 +735,9 @@ impl StylesDocument {
             Style::new("Footer", "footer", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font(
-                    self.lang.default_ascii_font(),
-                    self.lang.default_ascii_font(),
-                    self.lang.default_cs_font(),
-                )
-                .size(self.lang.default_font_size())
-                .size_cs(self.lang.default_cs_size())
+                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .size(normal_size)
+                .size_cs(normal_size_cs)
                 .add_tab(TabStop {
                     position: 4513,
                     alignment: "center".to_string(),
@@ -665,13 +751,14 @@ impl StylesDocument {
         );
 
         // CodeFilename style (filename above code blocks)
+        let code_filename_size = if normal_size > 4 { normal_size - 4 } else { 18 };
         self.add_style(
             Style::new("CodeFilename", "Code Filename", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font("Consolas", "Consolas", "Consolas")
-                .size(18) // 9pt
-                .size_cs(18)
+                .font(&code_font, &code_font, &code_font)
+                .size(code_filename_size) // approx 9pt
+                .size_cs(code_filename_size)
                 .bold()
                 .color("444444")
                 .spacing(120, 0) // 6pt before
@@ -679,12 +766,6 @@ impl StylesDocument {
         );
     }
 
-    /// Add a custom style
-    pub fn add_style(&mut self, style: Style) {
-        self.styles.push(style);
-    }
-
-    /// Generate XML for word/styles.xml
     pub fn to_xml(&self) -> Result<Vec<u8>> {
         use super::latent_styles::LatentStyles;
 
@@ -757,21 +838,30 @@ impl StylesDocument {
         // 5. w14:ligatures
 
         // 1. Default fonts
+        let ascii_font = self.get_ascii_font();
         let mut fonts = BytesStart::new("w:rFonts");
-        fonts.push_attribute(("w:ascii", self.lang.default_ascii_font()));
-        fonts.push_attribute(("w:hAnsi", self.lang.default_ascii_font()));
+        fonts.push_attribute(("w:ascii", ascii_font.as_str()));
+        fonts.push_attribute(("w:hAnsi", ascii_font.as_str()));
         fonts.push_attribute(("w:cs", self.lang.default_cs_font()));
         writer.write_event(Event::Empty(fonts))?;
 
         // 2. Default size
+        let normal_size = self.get_normal_size();
         let mut size = BytesStart::new("w:sz");
-        size.push_attribute(("w:val", self.lang.default_font_size().to_string().as_str()));
+        size.push_attribute(("w:val", normal_size.to_string().as_str()));
         writer.write_event(Event::Empty(size))?;
 
         // 3. Default complex script size
         let mut size_cs = BytesStart::new("w:szCs");
-        size_cs.push_attribute(("w:val", self.lang.default_cs_size().to_string().as_str()));
+        let thai_size = normal_size;
+        size_cs.push_attribute(("w:val", thai_size.to_string().as_str()));
         writer.write_event(Event::Empty(size_cs))?;
+
+        // Color (after size per ECMA-376)
+        let normal_color = self.get_normal_color();
+        let mut color = BytesStart::new("w:color");
+        color.push_attribute(("w:val", normal_color.as_str()));
+        writer.write_event(Event::Empty(color))?;
 
         // 4. Language setting for Thai support
         let mut lang = BytesStart::new("w:lang");
@@ -1697,7 +1787,7 @@ mod tests {
 
     #[test]
     fn test_styles_document_english() {
-        let doc = StylesDocument::new(Language::English);
+        let doc = StylesDocument::new(Language::English, None);
         assert_eq!(doc.styles.len(), 22); // All required styles (including TOCHeading, BodyText, CodeFilename, Header, and Footer)
 
         // Check Normal style
@@ -1759,7 +1849,7 @@ mod tests {
 
     #[test]
     fn test_styles_document_thai() {
-        let doc = StylesDocument::new(Language::Thai);
+        let doc = StylesDocument::new(Language::Thai, None);
         assert_eq!(doc.styles.len(), 22); // All required styles (including TOCHeading, BodyText, CodeFilename, Header, and Footer)
 
         // Check Normal style uses Thai font
@@ -1775,7 +1865,7 @@ mod tests {
         // Check TOCHeading
         let toc_heading = doc.styles.iter().find(|s| s.id == "TOCHeading").unwrap();
         assert_eq!(toc_heading.based_on, Some("Heading1".to_string()));
-        assert_eq!(toc_heading.size, Some(28)); // 14pt
+        assert_eq!(toc_heading.size, Some(34)); // 17pt
         assert_eq!(toc_heading.bold, true);
     }
 
@@ -1804,7 +1894,7 @@ mod tests {
 
     #[test]
     fn test_xml_structure() {
-        let doc = StylesDocument::new(Language::English);
+        let doc = StylesDocument::new(Language::English, None);
         let xml = doc.to_xml().unwrap();
         let xml_str = String::from_utf8(xml).unwrap();
 

@@ -58,6 +58,7 @@ image = { version = "0.25", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
 chromiumoxide = { version = "0.7", optional = true }
 icu_segmenter = { version = "1.5", optional = true }
+chrono = { version = "0.4", optional = true }
 
 # WASM dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -68,7 +69,7 @@ web-sys = { version = "0.3", features = ["Blob", "Url", "Window", "Document"] }
 
 [features]
 default = ["cli", "mermaid-png"]
-cli = ["dep:toml", "dep:clap", "dep:glob", "dep:walkdir", "dep:notify", "dep:rayon"]
+cli = ["dep:toml", "dep:clap", "dep:glob", "dep:walkdir", "dep:notify", "dep:rayon", "dep:chrono"]
 mermaid-png = ["dep:resvg", "dep:usvg", "dep:tiny-skia"]  # Convert mermaid SVG to PNG
 git = ["dep:gix"]
 wasm = ["dep:wasm-bindgen", "dep:console_error_panic_hook"]

@@ -211,7 +211,7 @@ mod tests {
     fn test_packager_basic() {
         // Create test components
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn test_packager_with_image() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn test_packager_thai() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::Thai);
+        let styles = StylesDocument::new(Language::Thai, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn test_packager_with_header_footer() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn test_packager_with_numbering() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -390,7 +390,7 @@ mod tests {
         document
             .add_paragraph(Paragraph::with_style("Normal").add_text("This is a test paragraph."));
 
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn test_packager_multiple_images() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn test_packager_with_footnotes() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn test_packager_with_header_rels() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();
@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn test_packager_with_footer_rels() {
         let document = DocumentXml::new();
-        let styles = StylesDocument::new(Language::English);
+        let styles = StylesDocument::new(Language::English, None);
         let content_types = ContentTypes::new();
         let rels = Relationships::root_rels();
         let doc_rels = Relationships::document_rels();

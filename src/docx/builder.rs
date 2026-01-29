@@ -917,8 +917,8 @@ fn block_to_elements(
                         .add_run(run)
                         .spacing(tmpl.caption.spacing_before, tmpl.caption.spacing_after);
 
-                    // Center align caption
-                    caption_para = caption_para.align("center");
+                    // Align caption to match image alignment
+                    caption_para = caption_para.align(&tmpl.alignment);
 
                     // Add bookmark if we have an ID
                     if let Some(fig_id) = id {
@@ -1047,8 +1047,8 @@ fn block_to_elements(
                                 .add_run(run)
                                 .spacing(tmpl.caption.spacing_before, tmpl.caption.spacing_after);
 
-                            // Center align caption
-                            caption_para = caption_para.align("center");
+                            // Align caption to match image alignment
+                            caption_para = caption_para.align(&tmpl.alignment);
 
                             // Add bookmark if we have an ID
                             if let Some(fig_id) = id {

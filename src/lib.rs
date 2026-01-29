@@ -324,7 +324,15 @@ pub fn markdown_to_docx_with_templates(
 
     let mut rel_manager = crate::docx::RelIdManager::new();
     let table_template = templates.and_then(|t| t.table.as_ref());
-    let mut build_result = build_document(&parsed, lang, config, &mut rel_manager, table_template);
+    let image_template = templates.and_then(|t| t.image.as_ref());
+    let mut build_result = build_document(
+        &parsed,
+        lang,
+        config,
+        &mut rel_manager,
+        table_template,
+        image_template,
+    );
 
     // Apply templates if provided
     if let Some(template_set) = templates {
@@ -337,6 +345,7 @@ pub fn markdown_to_docx_with_templates(
                 lang,
                 &mut rel_manager,
                 table_template,
+                image_template,
             )?;
         }
 
@@ -584,6 +593,7 @@ fn apply_cover_template(
     lang: Language,
     rel_manager: &mut crate::docx::RelIdManager,
     table_template: Option<&crate::template::extract::TableTemplate>,
+    image_template: Option<&crate::template::extract::ImageTemplate>,
 ) -> Result<()> {
     use crate::template::placeholder::replace_placeholders;
 
@@ -614,6 +624,7 @@ fn apply_cover_template(
                 &inside_config,
                 rel_manager,
                 table_template,
+                image_template,
             );
 
             // Merge resources from inside_result into main build_result
@@ -860,6 +871,7 @@ pub fn markdown_to_docx_with_includes(
         lang,
         &DocumentConfig::default(),
         &mut crate::docx::RelIdManager::new(),
+        None,
         None,
     );
 
@@ -1332,8 +1344,14 @@ mod tests {
 
         let parsed = parse_markdown_with_frontmatter(md);
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let build_result =
-            build_document(&parsed, Language::English, &config, &mut rel_manager, None);
+        let build_result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         // Verify headers and footers were generated
         assert!(
@@ -1431,6 +1449,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 

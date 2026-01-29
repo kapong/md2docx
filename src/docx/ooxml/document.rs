@@ -817,6 +817,48 @@ pub struct ImageElement {
     pub alt_text: String, // Alt text / description
     pub name: String,     // Image name/filename
     pub id: u32,          // Unique ID for docPr
+    pub border: Option<ImageBorderEffect>,
+    pub shadow: Option<ImageShadowEffect>,
+    pub effect_extent: Option<ImageEffectExtent>,
+}
+
+/// Image border effect for OOXML generation
+#[derive(Debug, Clone)]
+pub struct ImageBorderEffect {
+    /// Fill type: "solid", "none"
+    pub fill_type: String,
+    /// Color value (hex without # or scheme name)
+    pub color: String,
+    /// Whether color is a scheme color (theme-based)
+    pub is_scheme_color: bool,
+    /// Border width in EMUs (None = default thin line)
+    pub width: Option<u32>,
+}
+
+/// Image shadow effect for OOXML generation
+#[derive(Debug, Clone)]
+pub struct ImageShadowEffect {
+    /// Blur radius in EMUs
+    pub blur_radius: u32,
+    /// Shadow distance in EMUs
+    pub distance: u32,
+    /// Direction in 60000ths of degree
+    pub direction: u32,
+    /// Alignment: "ctr", "tl", "tr", "bl", "br"
+    pub alignment: String,
+    /// Shadow color (hex without #)
+    pub color: String,
+    /// Opacity in thousandths (30000 = 30%)
+    pub alpha: u32,
+}
+
+/// Effect extent for shadow/border space
+#[derive(Debug, Clone, Default)]
+pub struct ImageEffectExtent {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
 }
 
 impl ImageElement {
@@ -828,6 +870,9 @@ impl ImageElement {
             alt_text: String::new(),
             name: String::new(),
             id: 1,
+            border: None,
+            shadow: None,
+            effect_extent: None,
         }
     }
 
@@ -843,6 +888,21 @@ impl ImageElement {
 
     pub fn id(mut self, id: u32) -> Self {
         self.id = id;
+        self
+    }
+
+    pub fn with_border(mut self, border: ImageBorderEffect) -> Self {
+        self.border = Some(border);
+        self
+    }
+
+    pub fn with_shadow(mut self, shadow: ImageShadowEffect) -> Self {
+        self.shadow = Some(shadow);
+        self
+    }
+
+    pub fn with_effect_extent(mut self, extent: ImageEffectExtent) -> Self {
+        self.effect_extent = Some(extent);
         self
     }
 
@@ -1691,11 +1751,32 @@ impl DocumentXml {
         writer.write_event(Event::Empty(extent))?;
 
         // <wp:effectExtent l="0" t="0" r="0" b="0"/>
+        let extent = image.effect_extent.as_ref();
         let mut effect = BytesStart::new("wp:effectExtent");
-        effect.push_attribute(("l", "0"));
-        effect.push_attribute(("t", "0"));
-        effect.push_attribute(("r", "0"));
-        effect.push_attribute(("b", "0"));
+        effect.push_attribute((
+            "l",
+            extent
+                .map_or("0".to_string(), |e| e.left.to_string())
+                .as_str(),
+        ));
+        effect.push_attribute((
+            "t",
+            extent
+                .map_or("0".to_string(), |e| e.top.to_string())
+                .as_str(),
+        ));
+        effect.push_attribute((
+            "r",
+            extent
+                .map_or("0".to_string(), |e| e.right.to_string())
+                .as_str(),
+        ));
+        effect.push_attribute((
+            "b",
+            extent
+                .map_or("0".to_string(), |e| e.bottom.to_string())
+                .as_str(),
+        ));
         writer.write_event(Event::Empty(effect))?;
 
         // <wp:docPr id="1" name="Picture 1" descr="alt text"/>
@@ -1774,6 +1855,57 @@ impl DocumentXml {
         writer.write_event(Event::Start(geom))?;
         writer.write_event(Event::Empty(BytesStart::new("a:avLst")))?;
         writer.write_event(Event::End(BytesEnd::new("a:prstGeom")))?;
+
+        // <a:ln> (border)
+        if let Some(border) = &image.border {
+            let mut ln = BytesStart::new("a:ln");
+            if let Some(w) = border.width {
+                ln.push_attribute(("w", w.to_string().as_str()));
+            }
+            writer.write_event(Event::Start(ln))?;
+
+            if border.fill_type == "solid" {
+                writer.write_event(Event::Start(BytesStart::new("a:solidFill")))?;
+                if border.is_scheme_color {
+                    let mut clr = BytesStart::new("a:schemeClr");
+                    clr.push_attribute(("val", border.color.as_str()));
+                    writer.write_event(Event::Empty(clr))?;
+                } else {
+                    let mut clr = BytesStart::new("a:srgbClr");
+                    clr.push_attribute(("val", border.color.as_str()));
+                    writer.write_event(Event::Empty(clr))?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("a:solidFill")))?;
+            } else if border.fill_type == "none" {
+                writer.write_event(Event::Empty(BytesStart::new("a:noFill")))?;
+            }
+
+            writer.write_event(Event::End(BytesEnd::new("a:ln")))?;
+        }
+
+        // <a:effectLst> (shadow)
+        if let Some(shadow) = &image.shadow {
+            writer.write_event(Event::Start(BytesStart::new("a:effectLst")))?;
+            let mut outer_shadow = BytesStart::new("a:outerShdw");
+            outer_shadow.push_attribute(("blurRad", shadow.blur_radius.to_string().as_str()));
+            outer_shadow.push_attribute(("dist", shadow.distance.to_string().as_str()));
+            outer_shadow.push_attribute(("dir", shadow.direction.to_string().as_str()));
+            outer_shadow.push_attribute(("algn", shadow.alignment.as_str()));
+            writer.write_event(Event::Start(outer_shadow))?;
+
+            let mut clr = BytesStart::new("a:srgbClr");
+            clr.push_attribute(("val", shadow.color.as_str()));
+            writer.write_event(Event::Start(clr))?;
+
+            let mut alpha = BytesStart::new("a:alpha");
+            alpha.push_attribute(("val", shadow.alpha.to_string().as_str()));
+            writer.write_event(Event::Empty(alpha))?;
+
+            writer.write_event(Event::End(BytesEnd::new("a:srgbClr")))?;
+            writer.write_event(Event::End(BytesEnd::new("a:outerShdw")))?;
+            writer.write_event(Event::End(BytesEnd::new("a:effectLst")))?;
+        }
+
         writer.write_event(Event::End(BytesEnd::new("pic:spPr")))?;
 
         writer.write_event(Event::End(BytesEnd::new("pic:pic")))?;
@@ -1829,5 +1961,40 @@ mod tests {
         let xml = String::from_utf8(doc.to_xml().unwrap()).unwrap();
         assert!(xml.contains("<w:drawing>"));
         assert!(xml.contains("r:embed=\"rId1\""));
+    }
+
+    #[test]
+    fn test_image_with_effects() {
+        let image = ImageElement::new("rId1", 1000000, 750000)
+            .with_border(ImageBorderEffect {
+                fill_type: "solid".to_string(),
+                color: "accent1".to_string(),
+                is_scheme_color: true,
+                width: None,
+            })
+            .with_shadow(ImageShadowEffect {
+                blur_radius: 190500,
+                distance: 228600,
+                direction: 2700000,
+                alignment: "ctr".to_string(),
+                color: "000000".to_string(),
+                alpha: 30000,
+            })
+            .with_effect_extent(ImageEffectExtent {
+                left: 38100,
+                top: 38100,
+                right: 326390,
+                bottom: 327660,
+            });
+
+        let mut doc = DocumentXml::new();
+        doc.add_image(image);
+        let xml = String::from_utf8(doc.to_xml().unwrap()).unwrap();
+
+        assert!(xml.contains("<a:ln>"));
+        assert!(xml.contains("<a:schemeClr"));
+        assert!(xml.contains("<a:outerShdw"));
+        assert!(xml.contains("blurRad=\"190500\""));
+        assert!(xml.contains("<a:alpha val=\"30000\""));
     }
 }

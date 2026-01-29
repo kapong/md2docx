@@ -1,15 +1,21 @@
 [document]
 title = "คู่มือการใช้งาน md2docx"
 subtitle = "แปลง Markdown เป็น DOCX อย่างมืออาชีพ"
-author = "พงศ์พันธ์ เพียรพานิชย์"
+author = "ผู้เขียน ทดสอบ"
 date = "2026-01-29"
 language = "th"
+version = "1.0.0"
+page_width = "210mm"
+page_height = "297mm"
+page_margin_top = "31.475mm"
+page_margin_bottom = "31.475mm"
+page_margin_left = "25.4mm"
+page_margin_right = "25.4mm"
 
 [template]
 # Use directory-based template system
 dir = "template"
-# Fallback to single file if needed
-file = "custom-reference.docx"
+file = "custom-reference.docx"  # deprecated, use only template directory, no fallback
 
 [output]
 file = "output/manual-md2docx.docx"
@@ -19,33 +25,35 @@ enabled = true
 depth = 2
 title = "สารบัญ"
 
-[page_numbers]
-enabled = true
-skip_cover = true
-skip_chapter_first = true
+[page_numbers]              # deprecated, it's should depend on header-footer.docx template
+enabled = true              # deprecated, it's should depend on header-footer.docx template
+skip_cover = true           # deprecated, it's should be always true
+skip_chapter_first = true   # deprecated, it's should depend on header-footer.docx template
 
 [fonts]
 default = "TH Sarabun New"
 code = "Consolas"
+base_size = 14              # for normal text. on others should be computed from this
+h1_based_color = "#000080"     #deep blue color
 
 [code]
 theme = "light"
 show_filename = true
 show_line_numbers = false
 
-[images]
-max_width = "100%"
-auto_caption = true
+[images]                               # deprecated, it's should depend on image.docx template
+max_width = "100%"                     # deprecated, it's should depend on image.docx template
+auto_caption = true                    # deprecated, it's should depend on image.docx template
 
 # Header configuration
-[header]
+[header]                              # deprecated, it's should depend on header-footer.docx template
 left = "{title}"
 center = ""
 right = "{chapter}"
-skip_cover = true
+skip_cover = true           # deprecated, it's should depend on header-footer.docx template
 
 # Footer configuration
-[footer]
+[footer]                              # deprecated, it's should depend on header-footer.docx template
 left = ""
 center = "{page}"
 right = ""

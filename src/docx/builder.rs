@@ -361,7 +361,7 @@ fn is_heading(block: &Block) -> bool {
 /// let parsed = parse_markdown_with_frontmatter(md);
 /// let config = DocumentConfig::default();
 /// let mut rel_manager = RelIdManager::new();
-/// let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
+/// let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None, None);
 /// ```
 pub fn build_document(
     doc: &ParsedDocument,
@@ -369,6 +369,7 @@ pub fn build_document(
     config: &DocumentConfig,
     rel_manager: &mut crate::docx::RelIdManager,
     table_template: Option<&TableTemplate>,
+    image_template: Option<&crate::template::extract::ImageTemplate>,
 ) -> BuildResult {
     let mut doc_xml = DocumentXml::new();
     let mut image_ctx = ImageContext::new();
@@ -384,6 +385,7 @@ pub fn build_document(
     let mut toc_builder = TocBuilder::new();
     let mut bookmark_id_counter: u32 = 10000 + config.id_offset;
     let mut table_count: u32 = 0;
+    let mut figure_count: u32 = 0;
 
     // Cross-reference context for tracking anchors
     let mut xref_ctx = CrossRefContext::new();
@@ -424,7 +426,9 @@ pub fn build_document(
             &mut xref_ctx,
             rel_manager,
             table_template,
+            image_template,
             &mut table_count,
+            &mut figure_count,
             lang,
         );
 
@@ -732,7 +736,9 @@ pub struct BuildContext<'a> {
     pub xref_ctx: &'a mut CrossRefContext,
     pub rel_manager: &'a mut crate::docx::RelIdManager,
     pub table_template: Option<&'a TableTemplate>,
+    pub image_template: Option<&'a crate::template::extract::ImageTemplate>,
     pub table_count: &'a mut u32,
+    pub figure_count: &'a mut u32,
     pub lang: Language,
 }
 
@@ -749,7 +755,9 @@ impl<'a> BuildContext<'a> {
         xref_ctx: &'a mut CrossRefContext,
         rel_manager: &'a mut crate::docx::RelIdManager,
         table_template: Option<&'a TableTemplate>,
+        image_template: Option<&'a crate::template::extract::ImageTemplate>,
         table_count: &'a mut u32,
+        figure_count: &'a mut u32,
         lang: Language,
     ) -> Self {
         Self {
@@ -764,7 +772,9 @@ impl<'a> BuildContext<'a> {
             xref_ctx,
             rel_manager,
             table_template,
+            image_template,
             table_count,
+            figure_count,
             lang,
         }
     }
@@ -819,14 +829,111 @@ fn block_to_elements(
                 .unwrap_or((5486400, 3657600)); // Default 6x4 inches
 
             // Create image element
-            let img = ImageElement::new(&rel_id, width_emu, height_emu)
+            let mut img = ImageElement::new(&rel_id, width_emu, height_emu)
                 .alt_text(alt)
                 .name(src)
                 .id(*ctx.image_id);
 
+            // Apply template effects if available
+            if let Some(tmpl) = ctx.image_template {
+                // Apply border
+                if let Some(ref border) = tmpl.border {
+                    img = img.with_border(crate::docx::ooxml::ImageBorderEffect {
+                        fill_type: border.fill_type.clone(),
+                        color: border.color.clone(),
+                        is_scheme_color: border.is_scheme_color,
+                        width: border.width,
+                    });
+                }
+
+                // Apply shadow
+                if let Some(ref shadow) = tmpl.shadow {
+                    img = img.with_shadow(crate::docx::ooxml::ImageShadowEffect {
+                        blur_radius: shadow.blur_radius,
+                        distance: shadow.distance,
+                        direction: shadow.direction,
+                        alignment: shadow.alignment.clone(),
+                        color: shadow.color.clone(),
+                        alpha: shadow.alpha,
+                    });
+                }
+
+                // Apply effect extent
+                let extent = &tmpl.effect_extent;
+                if extent.left > 0 || extent.top > 0 || extent.right > 0 || extent.bottom > 0 {
+                    img = img.with_effect_extent(crate::docx::ooxml::ImageEffectExtent {
+                        left: extent.left,
+                        top: extent.top,
+                        right: extent.right,
+                        bottom: extent.bottom,
+                    });
+                }
+            }
+
             *ctx.image_id += 1;
 
-            vec![DocElement::Image(img)]
+            // Get figure number (either from xref or sequential)
+            let figure_number = if let Some(fig_id) = id {
+                // Already registered above, get the number
+                if let Some(anchor) = ctx.xref_ctx.resolve(fig_id) {
+                    anchor.number.clone()
+                } else {
+                    None
+                }
+            } else {
+                // No ID - just use sequential number
+                *ctx.figure_count += 1;
+                Some(ctx.figure_count.to_string())
+            };
+
+            // Build result elements
+            let mut elements = vec![DocElement::Image(img)];
+
+            // Add caption paragraph if template and alt text exist
+            if let Some(tmpl) = ctx.image_template {
+                if !alt.is_empty() {
+                    // Use localized prefix if template has default "Figure"
+                    let prefix = if tmpl.caption.prefix == "Figure" {
+                        ctx.lang.figure_caption_prefix().to_string()
+                    } else {
+                        tmpl.caption.prefix.clone()
+                    };
+
+                    let number_str = figure_number.unwrap_or_else(|| {
+                        *ctx.figure_count += 1;
+                        ctx.figure_count.to_string()
+                    });
+
+                    let caption_text = format!("{} {}: {}", prefix, number_str, alt);
+
+                    let mut run = Run::new(&caption_text);
+                    run.font = Some(tmpl.caption.font_family.clone());
+                    run.size = Some(tmpl.caption.font_size);
+                    run.color = Some(tmpl.caption.font_color.trim_start_matches('#').to_string());
+                    run.bold = tmpl.caption.bold;
+                    run.italic = tmpl.caption.italic;
+
+                    let mut caption_para = Paragraph::with_style("Caption")
+                        .add_run(run)
+                        .spacing(tmpl.caption.spacing_before, tmpl.caption.spacing_after);
+
+                    // Center align caption
+                    caption_para = caption_para.align("center");
+
+                    // Add bookmark if we have an ID
+                    if let Some(fig_id) = id {
+                        if let Some(anchor) = ctx.xref_ctx.resolve(fig_id) {
+                            *ctx.bookmark_id_counter += 1;
+                            caption_para = caption_para
+                                .with_bookmark(*ctx.bookmark_id_counter, &anchor.bookmark_name);
+                        }
+                    }
+
+                    elements.push(DocElement::Paragraph(Box::new(caption_para)));
+                }
+            }
+
+            elements
         }
 
         Block::Mermaid { content, id } => {
@@ -856,13 +963,109 @@ fn block_to_elements(
                         .map(|img| (img.width_emu, img.height_emu))
                         .unwrap_or((6 * 914400, 4 * 914400));
 
-                    let img = ImageElement::new(&rel_id, width_emu, height_emu)
+                    let mut img = ImageElement::new(&rel_id, width_emu, height_emu)
                         .alt_text("Mermaid Diagram")
                         .name(&filename)
                         .id(*ctx.image_id);
 
+                    // Apply template effects if available
+                    if let Some(tmpl) = ctx.image_template {
+                        // Apply border
+                        if let Some(ref border) = tmpl.border {
+                            img = img.with_border(crate::docx::ooxml::ImageBorderEffect {
+                                fill_type: border.fill_type.clone(),
+                                color: border.color.clone(),
+                                is_scheme_color: border.is_scheme_color,
+                                width: border.width,
+                            });
+                        }
+
+                        // Apply shadow
+                        if let Some(ref shadow) = tmpl.shadow {
+                            img = img.with_shadow(crate::docx::ooxml::ImageShadowEffect {
+                                blur_radius: shadow.blur_radius,
+                                distance: shadow.distance,
+                                direction: shadow.direction,
+                                alignment: shadow.alignment.clone(),
+                                color: shadow.color.clone(),
+                                alpha: shadow.alpha,
+                            });
+                        }
+
+                        // Apply effect extent
+                        let extent = &tmpl.effect_extent;
+                        if extent.left > 0
+                            || extent.top > 0
+                            || extent.right > 0
+                            || extent.bottom > 0
+                        {
+                            img = img.with_effect_extent(crate::docx::ooxml::ImageEffectExtent {
+                                left: extent.left,
+                                top: extent.top,
+                                right: extent.right,
+                                bottom: extent.bottom,
+                            });
+                        }
+                    }
+
                     *ctx.image_id += 1;
-                    vec![DocElement::Image(img)]
+
+                    // Build result elements
+                    let mut elements = vec![DocElement::Image(img)];
+
+                    // Add caption paragraph if template and id exist (Mermaid has no alt text)
+                    if let Some(tmpl) = ctx.image_template {
+                        if id.is_some() {
+                            // Get figure number from xref (already registered above)
+                            let figure_number = id.as_ref().and_then(|fig_id| {
+                                ctx.xref_ctx.resolve(fig_id).and_then(|a| a.number.clone())
+                            });
+
+                            // Use localized prefix if template has default "Figure"
+                            let prefix = if tmpl.caption.prefix == "Figure" {
+                                ctx.lang.figure_caption_prefix().to_string()
+                            } else {
+                                tmpl.caption.prefix.clone()
+                            };
+
+                            let number_str = figure_number.unwrap_or_else(|| {
+                                *ctx.figure_count += 1;
+                                ctx.figure_count.to_string()
+                            });
+
+                            let caption_text = format!("{} {}", prefix, number_str);
+
+                            let mut run = Run::new(&caption_text);
+                            run.font = Some(tmpl.caption.font_family.clone());
+                            run.size = Some(tmpl.caption.font_size);
+                            run.color =
+                                Some(tmpl.caption.font_color.trim_start_matches('#').to_string());
+                            run.bold = tmpl.caption.bold;
+                            run.italic = tmpl.caption.italic;
+
+                            let mut caption_para = Paragraph::with_style("Caption")
+                                .add_run(run)
+                                .spacing(tmpl.caption.spacing_before, tmpl.caption.spacing_after);
+
+                            // Center align caption
+                            caption_para = caption_para.align("center");
+
+                            // Add bookmark if we have an ID
+                            if let Some(fig_id) = id {
+                                if let Some(anchor) = ctx.xref_ctx.resolve(fig_id) {
+                                    *ctx.bookmark_id_counter += 1;
+                                    caption_para = caption_para.with_bookmark(
+                                        *ctx.bookmark_id_counter,
+                                        &anchor.bookmark_name,
+                                    );
+                                }
+                            }
+
+                            elements.push(DocElement::Paragraph(Box::new(caption_para)));
+                        }
+                    }
+
+                    elements
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to render mermaid diagram: {}", e);
@@ -1686,7 +1889,9 @@ fn inline_to_children(
                         xref_ctx: &mut footnote_xref_ctx,
                         rel_manager: ctx.rel_manager,
                         table_template: ctx.table_template,
+                        image_template: ctx.image_template,
                         table_count: &mut 0, // Footnotes don't typically have tables with captions, or they share numbering?
+                        figure_count: &mut 0,
                         lang: ctx.lang,
                     };
                     let paragraphs = block_to_paragraphs(
@@ -1815,6 +2020,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
 
         // Should have one footnote
@@ -1847,6 +2053,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -1885,6 +2092,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1918,6 +2126,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
 
         // Should have no footnotes (definition missing)
@@ -1946,6 +2155,7 @@ mod tests {
             &no_toc_config(),
             &mut rel_manager,
             None,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1970,6 +2180,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1993,6 +2204,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -2020,6 +2232,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -2052,6 +2265,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -2075,6 +2289,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -2113,7 +2328,14 @@ mod tests {
 
         let config = no_toc_config(); // Disable TOC for this test
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&doc, Language::English, &config, &mut rel_manager, None);
+        let result = build_document(
+            &doc,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         // Verify the document was built successfully
         assert!(!result.document.elements.is_empty());
@@ -2152,7 +2374,14 @@ mod tests {
 
         let config = DocumentConfig::default();
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&doc, Language::English, &config, &mut rel_manager, None);
+        let result = build_document(
+            &doc,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         // Should show placeholder for unresolved reference
         let paragraphs = get_paragraphs(&result.document);
@@ -2197,7 +2426,14 @@ mod tests {
 
         let config = DocumentConfig::default();
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&doc, Language::English, &config, &mut rel_manager, None);
+        let result = build_document(
+            &doc,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         // Check that figure reference is properly formatted
         let paragraphs = get_paragraphs(&result.document);
@@ -2221,6 +2457,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -2251,6 +2488,7 @@ mod tests {
             &no_toc_config(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2278,6 +2516,7 @@ mod tests {
             &no_toc_config(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2300,6 +2539,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2340,6 +2580,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2364,6 +2605,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2394,6 +2636,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2419,6 +2662,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2439,6 +2683,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2463,6 +2708,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2482,6 +2728,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2517,6 +2764,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2540,6 +2788,7 @@ mod tests {
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2561,6 +2810,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2604,6 +2854,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
 
@@ -2634,6 +2885,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2656,6 +2908,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2681,6 +2934,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2701,6 +2955,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2723,6 +2978,7 @@ End of document.
             &no_toc_config(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2744,6 +3000,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2768,6 +3025,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2789,6 +3047,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2843,6 +3102,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2866,6 +3126,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2894,6 +3155,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2914,6 +3176,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -2941,6 +3204,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2964,6 +3228,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
 
@@ -2983,6 +3248,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -3004,6 +3270,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -3038,6 +3305,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
         let docx = &result.document;
 
@@ -3061,6 +3329,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -3089,6 +3358,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -3121,6 +3391,7 @@ End of document.
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
             None,
         );
         let docx = &result.document;
@@ -3225,6 +3496,7 @@ End of document.
             &no_toc_config(),
             &mut rel_manager,
             None,
+            None,
         );
 
         assert_eq!(result.images.images.len(), 1);
@@ -3252,6 +3524,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -3287,7 +3560,14 @@ End of document.
         };
 
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         // Should have three headers and three footers:
         // 1. Default header/footer with content
@@ -3327,7 +3607,14 @@ End of document.
         };
 
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         // Should have three headers and three footers:
         // 1. Default header/footer with content
@@ -3356,7 +3643,14 @@ End of document.
         };
 
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         // Should have no headers or footers
         assert_eq!(result.headers.len(), 0);
@@ -3386,6 +3680,7 @@ End of document.
             &no_toc_config(),
             &mut rel_manager,
             None,
+            None,
         );
 
         assert_eq!(result.images.images.len(), 2);
@@ -3403,6 +3698,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -3454,6 +3750,7 @@ End of document.
             &no_toc_config(),
             &mut rel_manager,
             None,
+            None,
         );
 
         let docx = &result.document;
@@ -3483,7 +3780,14 @@ End of document.
             ..Default::default()
         };
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        );
 
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -3514,6 +3818,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -3554,6 +3859,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
 
         let docx = &result.document;
@@ -3587,6 +3893,7 @@ End of document.
             &DocumentConfig::default(),
             &mut rel_manager,
             None,
+            None,
         );
 
         if let Some(DocElement::Image(img)) = result.document.elements.first() {
@@ -3610,6 +3917,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -3635,6 +3943,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
             None,
         );
 
@@ -3663,6 +3972,7 @@ End of document.
             &config,
             &mut rel_manager,
             Some(&template),
+            None,
         );
 
         // Find the table
@@ -3712,6 +4022,7 @@ End of document.
             &config,
             &mut rel_manager,
             Some(&template),
+            None,
         );
 
         // Find the table
@@ -3797,6 +4108,7 @@ End of document.
             &config,
             &mut rel_manager,
             Some(&template),
+            None,
         );
 
         // Find the table
@@ -3854,6 +4166,7 @@ End of document.
             &config,
             &mut rel_manager,
             Some(&template),
+            None,
         );
 
         // Should have: Caption paragraph, Table, Empty paragraph
@@ -3888,6 +4201,7 @@ End of document.
             &config,
             &mut rel_manager,
             Some(&template),
+            None,
         );
 
         // Find the cross-reference run

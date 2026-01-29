@@ -141,25 +141,37 @@ impl CrossRefContext {
     /// Get display text for a reference
     /// Returns formatted text like "Figure 1.2" or just the title
     pub fn get_display_text(&self, target: &str, _ref_type: RefType) -> String {
+        self.get_localized_display_text(target, crate::docx::ooxml::Language::English)
+    }
+
+    /// Get localized display text for a reference
+    pub fn get_localized_display_text(
+        &self,
+        target: &str,
+        lang: crate::docx::ooxml::Language,
+    ) -> String {
         if let Some(anchor) = self.anchors.get(target) {
             match anchor.ref_type {
                 RefType::Figure => {
                     if let Some(num) = &anchor.number {
-                        format!("Figure {}", num)
+                        format!("{} {}", lang.figure_caption_prefix(), num)
                     } else {
                         anchor.display_text.clone()
                     }
                 }
                 RefType::Table => {
                     if let Some(num) = &anchor.number {
-                        format!("Table {}", num)
+                        format!("{} {}", lang.table_caption_prefix(), num)
                     } else {
                         anchor.display_text.clone()
                     }
                 }
                 RefType::Chapter => {
                     if let Some(num) = &anchor.number {
-                        format!("Chapter {}", num)
+                        match lang {
+                            crate::docx::ooxml::Language::Thai => format!("บทที่ {}", num),
+                            _ => format!("Chapter {}", num),
+                        }
                     } else {
                         anchor.display_text.clone()
                     }
@@ -167,7 +179,10 @@ impl CrossRefContext {
                 RefType::Section => anchor.display_text.clone(),
                 RefType::Appendix => {
                     if let Some(num) = &anchor.number {
-                        format!("Appendix {}", num)
+                        match lang {
+                            crate::docx::ooxml::Language::Thai => format!("ภาคผนวก {}", num),
+                            _ => format!("Appendix {}", num),
+                        }
                     } else {
                         anchor.display_text.clone()
                     }
@@ -254,6 +269,44 @@ mod tests {
         assert_eq!(
             ctx.get_display_text("unknown", RefType::Unknown),
             "[unknown]"
+        );
+    }
+
+    #[test]
+    fn test_get_localized_display_text() {
+        let mut ctx = CrossRefContext::new();
+        ctx.register_heading("ch1", 1, "Getting Started");
+        ctx.register_table("users", "User List");
+        ctx.register_figure("diagram", "Overview Diagram");
+
+        use crate::docx::ooxml::Language;
+
+        // English
+        assert_eq!(
+            ctx.get_localized_display_text("ch1", Language::English),
+            "Chapter 1"
+        );
+        assert_eq!(
+            ctx.get_localized_display_text("users", Language::English),
+            "Table 1.1"
+        );
+        assert_eq!(
+            ctx.get_localized_display_text("diagram", Language::English),
+            "Figure 1.1"
+        );
+
+        // Thai
+        assert_eq!(
+            ctx.get_localized_display_text("ch1", Language::Thai),
+            "บทที่ 1"
+        );
+        assert_eq!(
+            ctx.get_localized_display_text("users", Language::Thai),
+            "ตารางที่ 1.1"
+        );
+        assert_eq!(
+            ctx.get_localized_display_text("diagram", Language::Thai),
+            "รูปที่ 1.1"
         );
     }
 

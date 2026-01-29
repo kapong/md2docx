@@ -11,7 +11,9 @@ pub mod table;
 pub use cover::{CoverElement, CoverTemplate, ShapeType};
 pub use header_footer::{HeaderFooterContent, HeaderFooterTemplate, MediaFile};
 pub use image::{ImageCaptionStyle, ImageTemplate};
-pub use table::{BorderStyles, CellStyle, RowStyle, TableCaptionStyle, TableTemplate};
+pub use table::{
+    BorderStyles, CellMargins, CellSpacing, CellStyle, RowStyle, TableCaptionStyle, TableTemplate,
+};
 
 use crate::error::Result;
 use std::path::Path;

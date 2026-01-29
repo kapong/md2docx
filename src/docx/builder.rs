@@ -13,9 +13,10 @@ use crate::docx::ooxml::{
 use crate::docx::toc::{TocBuilder, TocConfig};
 use crate::docx::xref::CrossRefContext;
 use crate::parser::{
-    Alignment as ParserAlignment, Block, Inline, ListItem, ParsedDocument,
+    extract_inline_text, Alignment as ParserAlignment, Block, Inline, ListItem, ParsedDocument,
     TableCell as ParserTableCell,
 };
+use crate::template::extract::TableTemplate;
 use crate::Language;
 
 /// Tracks images during document building
@@ -338,30 +339,6 @@ fn is_heading(block: &Block) -> bool {
     matches!(block, Block::Heading { .. })
 }
 
-/// Extract plain text from inline elements (for TOC entries)
-fn extract_inline_text(inlines: &[Inline]) -> String {
-    inlines
-        .iter()
-        .map(|inline| match inline {
-            Inline::Text(t) => t.clone(),
-            Inline::Bold(inner) | Inline::Italic(inner) | Inline::Strikethrough(inner) => {
-                extract_inline_text(inner)
-            }
-            Inline::BoldItalic(inner) => extract_inline_text(inner),
-            Inline::Code(code) => code.clone(),
-            Inline::Link { text, .. } => extract_inline_text(text),
-            Inline::Image { alt, .. } => alt.clone(),
-            Inline::FootnoteRef(_) => String::new(),
-            Inline::CrossRef { .. } => String::new(),
-            Inline::SoftBreak => " ".to_string(),
-            Inline::HardBreak => "\n".to_string(),
-            Inline::Html(_) => String::new(),
-            Inline::IndexMarker(_) => String::new(),
-        })
-        .collect::<Vec<_>>()
-        .join("")
-}
-
 /// Build a DOCX document from parsed markdown
 ///
 /// # Arguments
@@ -384,13 +361,14 @@ fn extract_inline_text(inlines: &[Inline]) -> String {
 /// let parsed = parse_markdown_with_frontmatter(md);
 /// let config = DocumentConfig::default();
 /// let mut rel_manager = RelIdManager::new();
-/// let result = build_document(&parsed, Language::English, &config, &mut rel_manager);
+/// let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
 /// ```
 pub fn build_document(
     doc: &ParsedDocument,
-    _lang: Language,
+    lang: Language,
     config: &DocumentConfig,
     rel_manager: &mut crate::docx::RelIdManager,
+    table_template: Option<&TableTemplate>,
 ) -> BuildResult {
     let mut doc_xml = DocumentXml::new();
     let mut image_ctx = ImageContext::new();
@@ -405,6 +383,7 @@ pub fn build_document(
     // TOC builder for collecting headings
     let mut toc_builder = TocBuilder::new();
     let mut bookmark_id_counter: u32 = 10000 + config.id_offset;
+    let mut table_count: u32 = 0;
 
     // Cross-reference context for tracking anchors
     let mut xref_ctx = CrossRefContext::new();
@@ -433,18 +412,21 @@ pub fn build_document(
 
     for (i, block) in doc.blocks.iter().enumerate() {
         // Create build context
-        let mut ctx = BuildContext {
-            image_ctx: &mut image_ctx,
-            hyperlink_ctx: &mut hyperlink_ctx,
-            numbering_ctx: &mut numbering_ctx,
-            image_id: &mut image_id_counter,
+        let mut ctx = BuildContext::new(
+            &mut image_ctx,
+            &mut hyperlink_ctx,
+            &mut numbering_ctx,
+            &mut image_id_counter,
             doc,
-            footnotes: &mut footnotes,
-            toc_builder: &mut toc_builder,
-            bookmark_id_counter: &mut bookmark_id_counter,
-            xref_ctx: &mut xref_ctx,
+            &mut footnotes,
+            &mut toc_builder,
+            &mut bookmark_id_counter,
+            &mut xref_ctx,
             rel_manager,
-        };
+            table_template,
+            &mut table_count,
+            lang,
+        );
 
         // Insert blank paragraph before heading if previous block was not a heading
         if is_heading(block) {
@@ -749,6 +731,43 @@ pub struct BuildContext<'a> {
     pub bookmark_id_counter: &'a mut u32,
     pub xref_ctx: &'a mut CrossRefContext,
     pub rel_manager: &'a mut crate::docx::RelIdManager,
+    pub table_template: Option<&'a TableTemplate>,
+    pub table_count: &'a mut u32,
+    pub lang: Language,
+}
+
+impl<'a> BuildContext<'a> {
+    pub fn new(
+        image_ctx: &'a mut ImageContext,
+        hyperlink_ctx: &'a mut HyperlinkContext,
+        numbering_ctx: &'a mut NumberingContext,
+        image_id: &'a mut u32,
+        doc: &'a ParsedDocument,
+        footnotes: &'a mut FootnotesXml,
+        toc_builder: &'a mut TocBuilder,
+        bookmark_id_counter: &'a mut u32,
+        xref_ctx: &'a mut CrossRefContext,
+        rel_manager: &'a mut crate::docx::RelIdManager,
+        table_template: Option<&'a TableTemplate>,
+        table_count: &'a mut u32,
+        lang: Language,
+    ) -> Self {
+        Self {
+            image_ctx,
+            hyperlink_ctx,
+            numbering_ctx,
+            image_id,
+            doc,
+            footnotes,
+            toc_builder,
+            bookmark_id_counter,
+            xref_ctx,
+            rel_manager,
+            table_template,
+            table_count,
+            lang,
+        }
+    }
 }
 
 /// Convert a Block to one or more DocElements (Paragraph, Table, or Image)
@@ -860,17 +879,88 @@ fn block_to_elements(
             headers,
             alignments,
             rows,
+            caption,
+            id,
         } => {
+            let mut elements = Vec::new();
+
+            // Register table with cross-reference context if it has an ID
+            let table_number = if let Some(table_id) = id {
+                // Register and get the proper number (e.g., "1.2")
+                ctx.xref_ctx
+                    .register_table(table_id, caption.as_deref().unwrap_or(""));
+
+                // Get the number from xref context
+                if let Some(anchor) = ctx.xref_ctx.resolve(table_id) {
+                    anchor.number.clone()
+                } else {
+                    None
+                }
+            } else {
+                // No ID - just use sequential number
+                *ctx.table_count += 1;
+                Some(ctx.table_count.to_string())
+            };
+
+            // Add caption paragraph if template has caption style
+            if let Some(template) = ctx.table_template {
+                // Use localized prefix if template has default "Table"
+                let prefix = if template.caption.prefix == "Table" {
+                    ctx.lang.table_caption_prefix().to_string()
+                } else {
+                    template.caption.prefix.clone()
+                };
+
+                let number_str = table_number.unwrap_or_else(|| {
+                    *ctx.table_count += 1;
+                    ctx.table_count.to_string()
+                });
+
+                let caption_text = format!(
+                    "{} {}: {}",
+                    prefix,
+                    number_str,
+                    caption.as_deref().unwrap_or_default()
+                );
+
+                let mut run = Run::new(&caption_text);
+                run.font = Some(template.caption.font_family.clone());
+                run.size = Some(template.caption.font_size);
+                run.color = Some(
+                    template
+                        .caption
+                        .font_color
+                        .trim_start_matches('#')
+                        .to_string(),
+                );
+                run.bold = template.caption.bold;
+                run.italic = template.caption.italic;
+
+                let mut caption_para = Paragraph::with_style("Caption").add_run(run).spacing(
+                    template.caption.spacing_before,
+                    template.caption.spacing_after,
+                );
+
+                // Add bookmark if we have an ID
+                if let Some(table_id) = id {
+                    if let Some(anchor) = ctx.xref_ctx.resolve(table_id) {
+                        *ctx.bookmark_id_counter += 1;
+                        caption_para = caption_para
+                            .with_bookmark(*ctx.bookmark_id_counter, &anchor.bookmark_name);
+                    }
+                }
+
+                elements.push(DocElement::Paragraph(Box::new(caption_para)));
+            }
+
             let table = table_to_docx(headers, alignments, rows, ctx);
+            elements.push(DocElement::Table(table));
 
             // Add empty paragraph after table for spacing
-            // Set spacing to 0 to avoid double padding (since the line itself provides separation)
             let empty_para = Paragraph::default().spacing(0, 0).line_spacing(240, "auto");
+            elements.push(DocElement::Paragraph(Box::new(empty_para)));
 
-            vec![
-                DocElement::Table(table),
-                DocElement::Paragraph(Box::new(empty_para)),
-            ]
+            elements
         }
 
         Block::BlockQuote(blocks) => {
@@ -1117,6 +1207,12 @@ fn table_to_docx(
 ) -> Table {
     let mut table = Table::new().with_header_row(true);
 
+    // Apply borders if template available
+    if let Some(template) = ctx.table_template {
+        table = table.with_borders(template.borders.clone());
+        table = table.with_cell_margins(template.cell_margins.clone());
+    }
+
     // Calculate column count
     let col_count = headers.len();
 
@@ -1152,21 +1248,43 @@ fn table_to_docx(
     let col_width = 9000 / col_count.max(1) as u32;
     table = table.with_column_widths(vec![col_width; col_count]);
 
-    // Add header row
+    // Add header row (row index 0)
     let mut header_row = TableRow::new().header();
     for (i, cell) in headers.iter().enumerate() {
         let alignment = alignments.get(i).copied().unwrap_or(ParserAlignment::None);
-        let cell_elem = create_table_cell(&cell.content, alignment, true, cell_width, ctx);
+        let cell_elem = create_table_cell_with_template(
+            &cell.content,
+            alignment,
+            true, // is_header = true
+            cell_width,
+            0, // row_index = 0 for header
+            i, // col_index
+            ctx.table_template,
+            ctx,
+        );
         header_row = header_row.add_cell(cell_elem);
     }
     table = table.add_row(header_row);
 
     // Add data rows
-    for row in rows {
+    for (row_idx, row) in rows.iter().enumerate() {
+        let actual_row_idx = row_idx + 1; // +1 because header is row 0
         let mut data_row = TableRow::new();
-        for (i, cell) in row.iter().enumerate() {
-            let alignment = alignments.get(i).copied().unwrap_or(ParserAlignment::None);
-            let cell_elem = create_table_cell(&cell.content, alignment, false, cell_width, ctx);
+        for (col_idx, cell) in row.iter().enumerate() {
+            let alignment = alignments
+                .get(col_idx)
+                .copied()
+                .unwrap_or(ParserAlignment::None);
+            let cell_elem = create_table_cell_with_template(
+                &cell.content,
+                alignment,
+                false, // is_header = false
+                cell_width,
+                actual_row_idx,
+                col_idx,
+                ctx.table_template,
+                ctx,
+            );
             data_row = data_row.add_cell(cell_elem);
         }
         table = table.add_row(data_row);
@@ -1175,57 +1293,149 @@ fn table_to_docx(
     table
 }
 
-/// Create a table cell with content
-///
-/// # Arguments
-/// * `content` - Inline content for the cell
-/// * `alignment` - Cell alignment
-/// * `is_header` - Whether this is a header cell
-/// * `width` - Cell width
-/// * `ctx` - Build context holding tracked state
-///
-/// # Returns
-/// A DOCX TableCellElement
-fn create_table_cell(
+/// Create a table cell with template styling applied
+fn create_table_cell_with_template(
     content: &[Inline],
     alignment: ParserAlignment,
     is_header: bool,
     width: TableWidth,
+    row_index: usize,
+    col_index: usize,
+    template: Option<&TableTemplate>,
     ctx: &mut BuildContext,
 ) -> TableCellElement {
     let children = inlines_to_children(content, ctx);
 
     // Build paragraph from children
-    let mut p = Paragraph::new().spacing(0, 0).line_spacing(240, "auto");
-    for child in children {
-        p = match child {
-            ParagraphChild::Run(mut r) => {
-                if is_header {
-                    r.bold = true;
-                }
-                p.add_run(r)
-            }
-            ParagraphChild::Hyperlink(h) => p.add_hyperlink(h),
-        };
-    }
-
-    let align_str = match alignment {
-        ParserAlignment::Left => Some("left"),
-        ParserAlignment::Center => Some("center"),
-        ParserAlignment::Right => Some("right"),
-        ParserAlignment::None => None,
+    let mut p = if let Some(tmpl) = template {
+        Paragraph::new()
+            .spacing(tmpl.cell_spacing.before, tmpl.cell_spacing.after)
+            .line_spacing(tmpl.cell_spacing.line as i32, &tmpl.cell_spacing.line_rule)
+    } else {
+        Paragraph::new().spacing(0, 0).line_spacing(240, "auto")
     };
 
+    // Apply font properties from template
+    if let Some(tmpl) = template {
+        let row_style = tmpl.row_style_for_index(row_index);
+        let col_style = tmpl.cell_style_for_column(col_index);
+
+        // Process children with template styling
+        for child in children {
+            p = match child {
+                ParagraphChild::Run(mut r) => {
+                    // Row style provides font family, size, and color
+                    r.font = Some(row_style.font_family.clone());
+                    r.size = Some(row_style.font_size);
+                    r.color = Some(row_style.font_color.trim_start_matches('#').to_string());
+
+                    // For header row (index 0), use row_style for bold/italic
+                    // For data rows, use col_style (first_column or other_columns)
+                    if row_index == 0 {
+                        // Header row: use header style for bold/italic
+                        r.bold = row_style.bold;
+                        r.italic = row_style.italic;
+                    } else {
+                        // Data rows: use column style for bold/italic
+                        // This allows first_column.bold=true and other_columns.bold=false
+                        r.bold = col_style.bold;
+                        r.italic = col_style.italic;
+
+                        // Column style can also override font properties if explicitly set
+                        if col_style.font_family != "Calibri" {
+                            r.font = Some(col_style.font_family.clone());
+                        }
+                        if col_style.font_size != 22 {
+                            r.size = Some(col_style.font_size);
+                        }
+                        if col_style.font_color != "#000000" {
+                            r.color =
+                                Some(col_style.font_color.trim_start_matches('#').to_string());
+                        }
+                    }
+
+                    p.add_run(r)
+                }
+                ParagraphChild::Hyperlink(link) => p.add_hyperlink(link),
+            };
+        }
+    } else {
+        // No template, use default styling
+        for child in children {
+            p = match child {
+                ParagraphChild::Run(mut r) => {
+                    if is_header {
+                        r.bold = true;
+                    }
+                    p.add_run(r)
+                }
+                ParagraphChild::Hyperlink(link) => p.add_hyperlink(link),
+            };
+        }
+    }
+
     let mut cell = TableCellElement::new().width(width).add_paragraph(p);
+
+    // Apply alignment
+    let align_str = match alignment {
+        ParserAlignment::Left => Some("left"),
+        ParserAlignment::Right => Some("right"),
+        ParserAlignment::Center => Some("center"),
+        ParserAlignment::None => {
+            // If no markdown alignment, use template alignment if available
+            template.map(|tmpl| tmpl.cell_style_for_column(col_index).alignment.as_str())
+        }
+    };
     if let Some(align) = align_str {
         cell = cell.alignment(align);
     }
-    // Apply shading to header cells
-    if is_header {
-        cell.shading = Some("D9E2F3".to_string());
+
+    // Apply vertical alignment from template
+    if let Some(tmpl) = template {
+        let v_align = &tmpl.cell_style_for_column(col_index).vertical_alignment;
+        if !v_align.is_empty() {
+            cell = cell.vertical_alignment(v_align);
+        }
     }
-    // Remove spacing from table cell paragraphs to avoid extra gaps
+
+    // Apply shading from template or default
+    if let Some(shading) = get_row_shading(row_index, template) {
+        cell.shading = Some(shading);
+    }
+
     cell
+}
+
+/// Get the background color for a table row based on template
+fn get_row_shading(row_index: usize, template: Option<&TableTemplate>) -> Option<String> {
+    if let Some(tmpl) = template {
+        if row_index == 0 {
+            // Header row
+            tmpl.header
+                .background_color
+                .as_ref()
+                .map(|c| c.trim_start_matches('#').to_string())
+        } else if row_index % 2 == 1 {
+            // Odd row
+            tmpl.row_odd
+                .background_color
+                .as_ref()
+                .map(|c| c.trim_start_matches('#').to_string())
+        } else {
+            // Even row
+            tmpl.row_even
+                .background_color
+                .as_ref()
+                .map(|c| c.trim_start_matches('#').to_string())
+        }
+    } else {
+        // Default: light blue for header
+        if row_index == 0 {
+            Some("D9E2F3".to_string())
+        } else {
+            None
+        }
+    }
 }
 
 /// Convert a code block to paragraphs (one per line)
@@ -1475,6 +1685,9 @@ fn inline_to_children(
                         bookmark_id_counter: &mut footnote_bookmark_id,
                         xref_ctx: &mut footnote_xref_ctx,
                         rel_manager: ctx.rel_manager,
+                        table_template: ctx.table_template,
+                        table_count: &mut 0, // Footnotes don't typically have tables with captions, or they share numbering?
+                        lang: ctx.lang,
                     };
                     let paragraphs = block_to_paragraphs(
                         block,
@@ -1500,9 +1713,9 @@ fn inline_to_children(
             }
         }
 
-        Inline::CrossRef { target, ref_type } => {
-            // Get display text from cross-reference context
-            let display_text = ctx.xref_ctx.get_display_text(target, *ref_type);
+        Inline::CrossRef { target, .. } => {
+            // Get localized display text from cross-reference context
+            let display_text = ctx.xref_ctx.get_localized_display_text(target, ctx.lang);
 
             // Create a run with the display text, styled as a link
             // For now, just use blue color and underline
@@ -1601,6 +1814,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // Should have one footnote
@@ -1633,6 +1847,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // Should have two footnotes
@@ -1669,6 +1884,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1701,6 +1917,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // Should have no footnotes (definition missing)
@@ -1728,6 +1945,7 @@ mod tests {
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1751,6 +1969,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1774,6 +1993,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1800,6 +2020,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1830,6 +2051,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.footnotes.len(), 1);
@@ -1853,6 +2075,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         let xml = result.footnotes.to_xml().unwrap();
@@ -1890,7 +2113,7 @@ mod tests {
 
         let config = no_toc_config(); // Disable TOC for this test
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&doc, Language::English, &config, &mut rel_manager);
+        let result = build_document(&doc, Language::English, &config, &mut rel_manager, None);
 
         // Verify the document was built successfully
         assert!(!result.document.elements.is_empty());
@@ -1929,7 +2152,7 @@ mod tests {
 
         let config = DocumentConfig::default();
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&doc, Language::English, &config, &mut rel_manager);
+        let result = build_document(&doc, Language::English, &config, &mut rel_manager, None);
 
         // Should show placeholder for unresolved reference
         let paragraphs = get_paragraphs(&result.document);
@@ -1974,7 +2197,7 @@ mod tests {
 
         let config = DocumentConfig::default();
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&doc, Language::English, &config, &mut rel_manager);
+        let result = build_document(&doc, Language::English, &config, &mut rel_manager, None);
 
         // Check that figure reference is properly formatted
         let paragraphs = get_paragraphs(&result.document);
@@ -1998,6 +2221,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // BuildResult should include footnotes field
@@ -2026,6 +2250,7 @@ mod tests {
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2052,6 +2277,7 @@ mod tests {
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2074,6 +2300,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2112,6 +2339,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2136,6 +2364,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2164,6 +2393,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2188,6 +2418,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2208,6 +2439,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2230,6 +2462,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2249,6 +2482,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2282,6 +2516,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2304,6 +2539,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2325,6 +2561,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2366,6 +2603,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2395,6 +2633,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2417,6 +2656,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2440,6 +2680,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2460,6 +2701,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2480,6 +2722,7 @@ End of document.
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2501,6 +2744,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2523,6 +2767,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2544,6 +2789,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2596,6 +2842,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2619,6 +2866,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2645,6 +2893,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2665,6 +2914,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2690,6 +2940,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -2712,6 +2963,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2731,6 +2983,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2751,6 +3004,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2783,6 +3037,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2806,6 +3061,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2833,6 +3089,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2864,6 +3121,7 @@ End of document.
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
         let docx = &result.document;
 
@@ -2966,6 +3224,7 @@ End of document.
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.images.images.len(), 1);
@@ -2993,6 +3252,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // Check that image was added with correct width
@@ -3027,7 +3287,7 @@ End of document.
         };
 
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager);
+        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
 
         // Should have three headers and three footers:
         // 1. Default header/footer with content
@@ -3067,7 +3327,7 @@ End of document.
         };
 
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager);
+        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
 
         // Should have three headers and three footers:
         // 1. Default header/footer with content
@@ -3096,7 +3356,7 @@ End of document.
         };
 
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager);
+        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
 
         // Should have no headers or footers
         assert_eq!(result.headers.len(), 0);
@@ -3125,6 +3385,7 @@ End of document.
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
 
         assert_eq!(result.images.images.len(), 2);
@@ -3142,6 +3403,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         let docx = &result.document;
@@ -3191,6 +3453,7 @@ End of document.
             Language::English,
             &no_toc_config(),
             &mut rel_manager,
+            None,
         );
 
         let docx = &result.document;
@@ -3220,7 +3483,7 @@ End of document.
             ..Default::default()
         };
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let result = build_document(&parsed, Language::English, &config, &mut rel_manager);
+        let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None);
 
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -3251,6 +3514,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         let docx = &result.document;
@@ -3289,6 +3553,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         let docx = &result.document;
@@ -3321,6 +3586,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         if let Some(DocElement::Image(img)) = result.document.elements.first() {
@@ -3344,6 +3610,7 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // Parser creates BlockQuote with Paragraphs containing Inline::Image
@@ -3368,10 +3635,274 @@ End of document.
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // Verify BuildResult structure
         assert!(result.document.elements.len() > 0);
         assert_eq!(result.images.images.len(), 0);
+    }
+
+    #[test]
+    fn test_table_with_template() {
+        use crate::template::extract::TableTemplate;
+
+        let md = "| Header |\n| --- |\n| Cell |";
+        let parsed = parse_markdown_with_frontmatter(md);
+
+        // Create a custom table template
+        let mut template = TableTemplate::default();
+        template.header.background_color = Some("#FF0000".to_string()); // Red header
+        template.row_odd.background_color = Some("#00FF00".to_string()); // Green odd row (row 1 in data rows, index 1 in table)
+
+        let config = DocumentConfig::default();
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            Some(&template),
+        );
+
+        // Find the table
+        let table = result
+            .document
+            .elements
+            .iter()
+            .find_map(|el| match el {
+                DocElement::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("Should have a table");
+
+        // Check header shading
+        let header_cell = &table.rows[0].cells[0];
+        assert_eq!(header_cell.shading, Some("FF0000".to_string()));
+
+        // Check data row shading
+        let data_cell = &table.rows[1].cells[0];
+        assert_eq!(data_cell.shading, Some("00FF00".to_string()));
+    }
+
+    #[test]
+    fn test_first_column_bold_other_columns_normal() {
+        use crate::template::extract::TableTemplate;
+
+        // Create a table with 2 columns
+        let md = "| Header1 | Header2 |\n| --- | --- |\n| Row1Col1 | Row1Col2 |";
+        let parsed = parse_markdown_with_frontmatter(md);
+
+        // Create a template where:
+        // - first_column.bold = true
+        // - other_columns.bold = false
+        // - row styles (row_odd, row_even) have bold = false
+        let mut template = TableTemplate::default();
+        template.first_column.bold = true;
+        template.other_columns.bold = false;
+        template.row_odd.bold = false;
+        template.row_even.bold = false;
+        template.header.bold = true; // Keep header bold
+
+        let config = DocumentConfig::default();
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            Some(&template),
+        );
+
+        // Find the table
+        let table = result
+            .document
+            .elements
+            .iter()
+            .find_map(|el| match el {
+                DocElement::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("Should have a table");
+
+        // Verify we have 2 rows (header + 1 data row)
+        assert_eq!(table.rows.len(), 2, "Should have 2 rows");
+
+        // Header row (index 0) - both cells should be bold (from header row style)
+        let header_row = &table.rows[0];
+        assert_eq!(header_row.cells.len(), 2, "Header should have 2 cells");
+
+        // Check header cells are bold
+        for (i, cell) in header_row.cells.iter().enumerate() {
+            let para = &cell.paragraphs[0];
+            let runs: Vec<_> = para.iter_runs().collect();
+            assert!(!runs.is_empty(), "Header cell {} should have runs", i);
+            for run in runs {
+                assert!(run.bold, "Header cell {} run should be bold", i);
+            }
+        }
+
+        // Data row (index 1)
+        let data_row = &table.rows[1];
+        assert_eq!(data_row.cells.len(), 2, "Data row should have 2 cells");
+
+        // First cell (col 0) should have bold text
+        let first_cell_para = &data_row.cells[0].paragraphs[0];
+        let first_cell_runs: Vec<_> = first_cell_para.iter_runs().collect();
+        assert!(!first_cell_runs.is_empty(), "First cell should have runs");
+        for run in &first_cell_runs {
+            assert!(
+                run.bold,
+                "First column cell should be bold. Run text: '{}'",
+                run.text
+            );
+        }
+
+        // Second cell (col 1) should NOT have bold text
+        let second_cell_para = &data_row.cells[1].paragraphs[0];
+        let second_cell_runs: Vec<_> = second_cell_para.iter_runs().collect();
+        assert!(!second_cell_runs.is_empty(), "Second cell should have runs");
+        for run in &second_cell_runs {
+            assert!(
+                !run.bold,
+                "Other column cells should NOT be bold. Run text: '{}'",
+                run.text
+            );
+        }
+    }
+
+    #[test]
+    fn test_table_with_borders() {
+        use crate::template::extract::table::{BorderStyle, BorderStyles, TableTemplate};
+
+        let md = "| Header |\n| --- |\n| Cell |";
+        let parsed = parse_markdown_with_frontmatter(md);
+
+        // Create a custom table template with specific borders
+        let mut template = TableTemplate::default();
+        template.borders = BorderStyles {
+            top: BorderStyle {
+                style: "double".to_string(),
+                color: "#FF0000".to_string(),
+                width: 8,
+            },
+            ..Default::default()
+        };
+
+        let config = DocumentConfig::default();
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            Some(&template),
+        );
+
+        // Find the table
+        let table = result
+            .document
+            .elements
+            .iter()
+            .find_map(|el| match el {
+                DocElement::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("Should have a table");
+
+        // Check borders
+        assert!(table.borders.is_some());
+        let borders = table.borders.as_ref().unwrap();
+        assert_eq!(borders.top.style, "double");
+        assert_eq!(borders.top.color, "#FF0000");
+        assert_eq!(borders.top.width, 8);
+    }
+
+    #[test]
+    fn test_table_with_caption() {
+        use crate::template::extract::table::TableTemplate;
+
+        // Note: Currently we don't have parser support for captions,
+        // so we manually create a Block::Table with a caption for testing.
+        let table_block = Block::Table {
+            headers: vec![ParserTableCell {
+                content: vec![Inline::Text("Header".to_string())],
+                is_header: true,
+            }],
+            alignments: vec![ParserAlignment::None],
+            rows: vec![vec![ParserTableCell {
+                content: vec![Inline::Text("Cell".to_string())],
+                is_header: false,
+            }]],
+            caption: Some("My Table Caption".to_string()),
+            id: None,
+        };
+
+        let doc = ParsedDocument {
+            blocks: vec![table_block],
+            ..Default::default()
+        };
+
+        // Create a custom table template
+        let template = TableTemplate::default();
+
+        let config = DocumentConfig::default();
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &doc,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            Some(&template),
+        );
+
+        // Should have: Caption paragraph, Table, Empty paragraph
+        assert_eq!(result.document.elements.len(), 3);
+
+        // Check caption paragraph
+        if let DocElement::Paragraph(p) = &result.document.elements[0] {
+            assert_eq!(p.style_id, Some("Caption".to_string()));
+            let text: String = p.iter_runs().map(|r| r.text.as_str()).collect();
+            // Default prefix is "Table", number should be 1
+            assert!(text.contains("Table 1: My Table Caption"));
+        } else {
+            panic!("Expected caption paragraph");
+        }
+    }
+
+    #[test]
+    fn test_table_cross_reference_thai() {
+        let md = "# Chapter 1 {#ch1}\n\nTable: My Table {#tbl:test}\n| A | B |\n|---|---|\n| 1 | 2 |\n\nSee {ref:tbl:test}.";
+        let parsed = parse_markdown_with_frontmatter(md);
+
+        let mut config = DocumentConfig::default();
+        config.toc.enabled = false;
+        let mut rel_manager = crate::docx::RelIdManager::new();
+
+        // Mock table template to ensure caption generation
+        let template = crate::template::extract::TableTemplate::default();
+
+        let result = build_document(
+            &parsed,
+            Language::Thai,
+            &config,
+            &mut rel_manager,
+            Some(&template),
+        );
+
+        // Find the cross-reference run
+        let mut found_ref = false;
+        for elem in &result.document.elements {
+            if let DocElement::Paragraph(p) = elem {
+                let text: String = p.iter_runs().map(|r| r.text.as_str()).collect();
+                if text.contains("ตารางที่ 1.1") {
+                    found_ref = true;
+                }
+            }
+        }
+        assert!(
+            found_ref,
+            "Cross-reference 'ตารางที่ 1.1' not found in document"
+        );
     }
 }

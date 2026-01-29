@@ -48,6 +48,22 @@ impl Language {
             Language::Thai => 28,    // 14pt
         }
     }
+
+    /// Get localized table caption prefix
+    pub fn table_caption_prefix(&self) -> &'static str {
+        match self {
+            Language::English => "Table",
+            Language::Thai => "ตารางที่",
+        }
+    }
+
+    /// Get localized figure/image caption prefix
+    pub fn figure_caption_prefix(&self) -> &'static str {
+        match self {
+            Language::English => "Figure",
+            Language::Thai => "รูปที่",
+        }
+    }
 }
 
 /// Style type
@@ -1908,5 +1924,17 @@ mod tests {
         assert_eq!(StyleType::Character.as_str(), "character");
         assert_eq!(StyleType::Table.as_str(), "table");
         assert_eq!(StyleType::Numbering.as_str(), "numbering");
+    }
+
+    #[test]
+    fn test_language_table_caption_prefix() {
+        assert_eq!(Language::English.table_caption_prefix(), "Table");
+        assert_eq!(Language::Thai.table_caption_prefix(), "ตารางที่");
+    }
+
+    #[test]
+    fn test_language_figure_caption_prefix() {
+        assert_eq!(Language::English.figure_caption_prefix(), "Figure");
+        assert_eq!(Language::Thai.figure_caption_prefix(), "รูปที่");
     }
 }

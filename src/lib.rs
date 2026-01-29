@@ -323,7 +323,8 @@ pub fn markdown_to_docx_with_templates(
     let parsed = parse_markdown_with_frontmatter(markdown);
 
     let mut rel_manager = crate::docx::RelIdManager::new();
-    let mut build_result = build_document(&parsed, lang, config, &mut rel_manager);
+    let table_template = templates.and_then(|t| t.table.as_ref());
+    let mut build_result = build_document(&parsed, lang, config, &mut rel_manager, table_template);
 
     // Apply templates if provided
     if let Some(template_set) = templates {
@@ -335,6 +336,7 @@ pub fn markdown_to_docx_with_templates(
                 placeholder_ctx,
                 lang,
                 &mut rel_manager,
+                table_template,
             )?;
         }
 
@@ -581,6 +583,7 @@ fn apply_cover_template(
     placeholder_ctx: &crate::template::PlaceholderContext,
     lang: Language,
     rel_manager: &mut crate::docx::RelIdManager,
+    table_template: Option<&crate::template::extract::TableTemplate>,
 ) -> Result<()> {
     use crate::template::placeholder::replace_placeholders;
 
@@ -605,7 +608,13 @@ fn apply_cover_template(
                 ..Default::default()
             };
             // Use the same rel_manager!
-            let inside_result = build_document(&inside_parsed, lang, &inside_config, rel_manager);
+            let inside_result = build_document(
+                &inside_parsed,
+                lang,
+                &inside_config,
+                rel_manager,
+                table_template,
+            );
 
             // Merge resources from inside_result into main build_result
             build_result
@@ -851,6 +860,7 @@ pub fn markdown_to_docx_with_includes(
         lang,
         &DocumentConfig::default(),
         &mut crate::docx::RelIdManager::new(),
+        None,
     );
 
     let buffer = Cursor::new(Vec::new());
@@ -1322,7 +1332,8 @@ mod tests {
 
         let parsed = parse_markdown_with_frontmatter(md);
         let mut rel_manager = crate::docx::RelIdManager::new();
-        let build_result = build_document(&parsed, Language::English, &config, &mut rel_manager);
+        let build_result =
+            build_document(&parsed, Language::English, &config, &mut rel_manager, None);
 
         // Verify headers and footers were generated
         assert!(
@@ -1420,6 +1431,7 @@ mod tests {
             Language::English,
             &DocumentConfig::default(),
             &mut rel_manager,
+            None,
         );
 
         // Default config has headers and footers

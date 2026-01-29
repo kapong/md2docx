@@ -67,6 +67,8 @@ pub enum Block {
         headers: Vec<TableCell>,
         alignments: Vec<Alignment>,
         rows: Vec<Vec<TableCell>>,
+        caption: Option<String>,
+        id: Option<String>,
     },
 
     /// Image (block-level, becomes figure with caption)
@@ -178,6 +180,30 @@ pub enum Inline {
 
     /// Index marker: {index:term}
     IndexMarker(String),
+}
+
+/// Extract plain text from inline elements
+pub fn extract_inline_text(inlines: &[Inline]) -> String {
+    inlines
+        .iter()
+        .map(|inline| match inline {
+            Inline::Text(t) => t.clone(),
+            Inline::Bold(inner) | Inline::Italic(inner) | Inline::Strikethrough(inner) => {
+                extract_inline_text(inner)
+            }
+            Inline::BoldItalic(inner) => extract_inline_text(inner),
+            Inline::Code(code) => code.clone(),
+            Inline::Link { text, .. } => extract_inline_text(text),
+            Inline::Image { alt, .. } => alt.clone(),
+            Inline::FootnoteRef(_) => String::new(),
+            Inline::CrossRef { .. } => String::new(),
+            Inline::SoftBreak => " ".to_string(),
+            Inline::HardBreak => "\n".to_string(),
+            Inline::Html(_) => String::new(),
+            Inline::IndexMarker(_) => String::new(),
+        })
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// Type of cross-reference

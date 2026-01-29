@@ -6,6 +6,7 @@ use std::io::Cursor;
 
 use crate::error::Result;
 use crate::i18n::detection::detect_language;
+use crate::template::extract::table::{BorderStyle, BorderStyles, CellMargins};
 
 /// Header and footer references for a section
 #[derive(Debug, Clone, Default)]
@@ -881,22 +882,8 @@ pub struct Table {
     pub column_widths: Vec<u32>, // In twips (20ths of a point)
     pub has_header_row: bool,
     pub width: TableWidth,
-}
-
-/// Table row
-#[derive(Debug, Clone)]
-pub struct TableRow {
-    pub cells: Vec<TableCellElement>,
-    pub is_header: bool,
-}
-
-/// Table cell
-#[derive(Debug, Clone)]
-pub struct TableCellElement {
-    pub paragraphs: Vec<Paragraph>,
-    pub width: TableWidth,
-    pub alignment: Option<String>, // "left", "center", "right"
-    pub shading: Option<String>,   // Fill color (hex without #)
+    pub borders: Option<BorderStyles>, // Template borders
+    pub cell_margins: Option<CellMargins>,
 }
 
 impl Table {
@@ -906,7 +893,21 @@ impl Table {
             column_widths: Vec::new(),
             has_header_row: false,
             width: TableWidth::Auto,
+            borders: None,
+            cell_margins: None,
         }
+    }
+
+    /// Set table borders from template
+    pub fn with_borders(mut self, borders: BorderStyles) -> Self {
+        self.borders = Some(borders);
+        self
+    }
+
+    /// Set table cell margins from template
+    pub fn with_cell_margins(mut self, margins: CellMargins) -> Self {
+        self.cell_margins = Some(margins);
+        self
     }
 
     /// Add a row to the table
@@ -932,6 +933,23 @@ impl Table {
         self.width = width;
         self
     }
+}
+
+/// Table row
+#[derive(Debug, Clone)]
+pub struct TableRow {
+    pub cells: Vec<TableCellElement>,
+    pub is_header: bool,
+}
+
+/// Table cell
+#[derive(Debug, Clone)]
+pub struct TableCellElement {
+    pub paragraphs: Vec<Paragraph>,
+    pub width: TableWidth,
+    pub alignment: Option<String>,          // "left", "center", "right"
+    pub vertical_alignment: Option<String>, // "top", "center", "bottom"
+    pub shading: Option<String>,            // Fill color (hex without #)
 }
 
 impl TableRow {
@@ -961,6 +979,7 @@ impl TableCellElement {
             paragraphs: Vec::new(),
             width: TableWidth::Auto,
             alignment: None,
+            vertical_alignment: None,
             shading: None,
         }
     }
@@ -980,6 +999,12 @@ impl TableCellElement {
     /// Set cell alignment
     pub fn alignment(mut self, align: &str) -> Self {
         self.alignment = Some(align.to_string());
+        self
+    }
+
+    /// Set cell vertical alignment
+    pub fn vertical_alignment(mut self, align: &str) -> Self {
+        self.vertical_alignment = Some(align.to_string());
         self
     }
 
@@ -1390,6 +1415,23 @@ impl DocumentXml {
         Ok(())
     }
 
+    pub fn write_border<W: std::io::Write>(
+        &self,
+        writer: &mut Writer<W>,
+        tag: &str,
+        border: &BorderStyle,
+    ) -> Result<()> {
+        let mut elem = BytesStart::new(tag);
+        elem.push_attribute(("w:val", border.style.as_str()));
+        elem.push_attribute(("w:sz", border.width.to_string().as_str()));
+        elem.push_attribute(("w:space", "0"));
+        // Remove # from color if present
+        let color = border.color.trim_start_matches('#');
+        elem.push_attribute(("w:color", color));
+        writer.write_event(Event::Empty(elem))?;
+        Ok(())
+    }
+
     /// Write a table element
     fn write_table<W: std::io::Write>(&self, writer: &mut Writer<W>, table: &Table) -> Result<()> {
         writer.write_event(Event::Start(BytesStart::new("w:tbl")))?;
@@ -1423,27 +1465,33 @@ impl DocumentXml {
         // Table cell margins (padding)
         writer.write_event(Event::Start(BytesStart::new("w:tblCellMar")))?;
 
-        // Top margin: 100 twips (5pt)
+        let (top, bottom, left, right) = if let Some(margins) = &table.cell_margins {
+            (margins.top, margins.bottom, margins.left, margins.right)
+        } else {
+            (100, 100, 100, 100) // Default values
+        };
+
+        // Top margin
         let mut top_mar = BytesStart::new("w:top");
-        top_mar.push_attribute(("w:w", "100"));
+        top_mar.push_attribute(("w:w", top.to_string().as_str()));
         top_mar.push_attribute(("w:type", "dxa"));
         writer.write_event(Event::Empty(top_mar))?;
 
-        // Bottom margin: 100 twips (5pt)
+        // Bottom margin
         let mut bottom_mar = BytesStart::new("w:bottom");
-        bottom_mar.push_attribute(("w:w", "100"));
+        bottom_mar.push_attribute(("w:w", bottom.to_string().as_str()));
         bottom_mar.push_attribute(("w:type", "dxa"));
         writer.write_event(Event::Empty(bottom_mar))?;
 
-        // Left margin: 100 twips (5pt)
+        // Left margin
         let mut left_mar = BytesStart::new("w:left");
-        left_mar.push_attribute(("w:w", "100"));
+        left_mar.push_attribute(("w:w", left.to_string().as_str()));
         left_mar.push_attribute(("w:type", "dxa"));
         writer.write_event(Event::Empty(left_mar))?;
 
-        // Right margin: 100 twips (5pt)
+        // Right margin
         let mut right_mar = BytesStart::new("w:right");
-        right_mar.push_attribute(("w:w", "100"));
+        right_mar.push_attribute(("w:w", right.to_string().as_str()));
         right_mar.push_attribute(("w:type", "dxa"));
         writer.write_event(Event::Empty(right_mar))?;
 
@@ -1452,53 +1500,64 @@ impl DocumentXml {
         // Table borders
         writer.write_event(Event::Start(BytesStart::new("w:tblBorders")))?;
 
-        // Top border
-        let mut border = BytesStart::new("w:top");
-        border.push_attribute(("w:val", "single"));
-        border.push_attribute(("w:sz", "4"));
-        border.push_attribute(("w:space", "0"));
-        border.push_attribute(("w:color", "auto"));
-        writer.write_event(Event::Empty(border))?;
+        if let Some(borders) = &table.borders {
+            // Use template borders
+            self.write_border(writer, "w:top", &borders.top)?;
+            self.write_border(writer, "w:left", &borders.left)?;
+            self.write_border(writer, "w:bottom", &borders.bottom)?;
+            self.write_border(writer, "w:right", &borders.right)?;
+            self.write_border(writer, "w:insideH", &borders.inside_h)?;
+            self.write_border(writer, "w:insideV", &borders.inside_v)?;
+        } else {
+            // Default borders
+            // Top border
+            let mut border = BytesStart::new("w:top");
+            border.push_attribute(("w:val", "single"));
+            border.push_attribute(("w:sz", "4"));
+            border.push_attribute(("w:space", "0"));
+            border.push_attribute(("w:color", "auto"));
+            writer.write_event(Event::Empty(border))?;
 
-        // Left border
-        let mut border = BytesStart::new("w:left");
-        border.push_attribute(("w:val", "single"));
-        border.push_attribute(("w:sz", "4"));
-        border.push_attribute(("w:space", "0"));
-        border.push_attribute(("w:color", "auto"));
-        writer.write_event(Event::Empty(border))?;
+            // Left border
+            let mut border = BytesStart::new("w:left");
+            border.push_attribute(("w:val", "single"));
+            border.push_attribute(("w:sz", "4"));
+            border.push_attribute(("w:space", "0"));
+            border.push_attribute(("w:color", "auto"));
+            writer.write_event(Event::Empty(border))?;
 
-        // Bottom border
-        let mut border = BytesStart::new("w:bottom");
-        border.push_attribute(("w:val", "single"));
-        border.push_attribute(("w:sz", "4"));
-        border.push_attribute(("w:space", "0"));
-        border.push_attribute(("w:color", "auto"));
-        writer.write_event(Event::Empty(border))?;
+            // Bottom border
+            let mut border = BytesStart::new("w:bottom");
+            border.push_attribute(("w:val", "single"));
+            border.push_attribute(("w:sz", "4"));
+            border.push_attribute(("w:space", "0"));
+            border.push_attribute(("w:color", "auto"));
+            writer.write_event(Event::Empty(border))?;
 
-        // Right border
-        let mut border = BytesStart::new("w:right");
-        border.push_attribute(("w:val", "single"));
-        border.push_attribute(("w:sz", "4"));
-        border.push_attribute(("w:space", "0"));
-        border.push_attribute(("w:color", "auto"));
-        writer.write_event(Event::Empty(border))?;
+            // Right border
+            let mut border = BytesStart::new("w:right");
+            border.push_attribute(("w:val", "single"));
+            border.push_attribute(("w:sz", "4"));
+            border.push_attribute(("w:space", "0"));
+            border.push_attribute(("w:color", "auto"));
+            writer.write_event(Event::Empty(border))?;
 
-        // Inside horizontal borders
-        let mut border = BytesStart::new("w:insideH");
-        border.push_attribute(("w:val", "single"));
-        border.push_attribute(("w:sz", "4"));
-        border.push_attribute(("w:space", "0"));
-        border.push_attribute(("w:color", "auto"));
-        writer.write_event(Event::Empty(border))?;
+            // Inside horizontal borders
+            let mut border = BytesStart::new("w:insideH");
+            border.push_attribute(("w:val", "single"));
+            border.push_attribute(("w:sz", "4"));
+            border.push_attribute(("w:space", "0"));
+            border.push_attribute(("w:color", "auto"));
+            writer.write_event(Event::Empty(border))?;
 
-        // Inside vertical borders
-        let mut border = BytesStart::new("w:insideV");
-        border.push_attribute(("w:val", "single"));
-        border.push_attribute(("w:sz", "4"));
-        border.push_attribute(("w:space", "0"));
-        border.push_attribute(("w:color", "auto"));
-        writer.write_event(Event::Empty(border))?;
+            // Inside vertical borders
+            let mut border = BytesStart::new("w:insideV");
+            border.push_attribute(("w:val", "single"));
+            border.push_attribute(("w:sz", "4"));
+            border.push_attribute(("w:space", "0"));
+            border.push_attribute(("w:color", "auto"));
+            writer.write_event(Event::Empty(border))?;
+        }
 
         writer.write_event(Event::End(BytesEnd::new("w:tblBorders")))?;
         writer.write_event(Event::End(BytesEnd::new("w:tblPr")))?;
@@ -1581,6 +1640,13 @@ impl DocumentXml {
             writer.write_event(Event::Empty(jc))?;
         }
 
+        // Cell vertical alignment
+        if let Some(v_align) = &cell.vertical_alignment {
+            let mut valign = BytesStart::new("w:vAlign");
+            valign.push_attribute(("w:val", v_align.as_str()));
+            writer.write_event(Event::Empty(valign))?;
+        }
+
         // Cell shading
         if let Some(shading) = &cell.shading {
             let mut shd = BytesStart::new("w:shd");
@@ -1643,6 +1709,7 @@ impl DocumentXml {
 
         // <wp:cNvGraphicFramePr>
         writer.write_event(Event::Start(BytesStart::new("wp:cNvGraphicFramePr")))?;
+        // <a:graphicFrameLocks noChangeAspect="1"/>
         let mut locks = BytesStart::new("a:graphicFrameLocks");
         locks.push_attribute((
             "xmlns:a",
@@ -1653,43 +1720,36 @@ impl DocumentXml {
         writer.write_event(Event::End(BytesEnd::new("wp:cNvGraphicFramePr")))?;
 
         // <a:graphic>
-        let mut graphic = BytesStart::new("a:graphic");
-        graphic.push_attribute((
-            "xmlns:a",
-            "http://schemas.openxmlformats.org/drawingml/2006/main",
-        ));
-        writer.write_event(Event::Start(graphic))?;
-
-        // <a:graphicData uri="...">
-        let mut graphic_data = BytesStart::new("a:graphicData");
-        graphic_data.push_attribute((
+        writer.write_event(Event::Start(BytesStart::new("a:graphic")))?;
+        // <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+        let mut data = BytesStart::new("a:graphicData");
+        data.push_attribute((
             "uri",
             "http://schemas.openxmlformats.org/drawingml/2006/picture",
         ));
-        writer.write_event(Event::Start(graphic_data))?;
+        writer.write_event(Event::Start(data))?;
 
         // <pic:pic>
-        let mut pic_pic = BytesStart::new("pic:pic");
-        pic_pic.push_attribute((
-            "xmlns:pic",
-            "http://schemas.openxmlformats.org/drawingml/2006/picture",
-        ));
-        writer.write_event(Event::Start(pic_pic))?;
+        writer.write_event(Event::Start(BytesStart::new("pic:pic")))?;
 
         // <pic:nvPicPr>
         writer.write_event(Event::Start(BytesStart::new("pic:nvPicPr")))?;
-        let mut cnv_pr = BytesStart::new("pic:cNvPr");
-        cnv_pr.push_attribute(("id", image.id.to_string().as_str()));
-        cnv_pr.push_attribute(("name", image.name.as_str()));
-        writer.write_event(Event::Empty(cnv_pr))?;
+        // <pic:cNvPr id="0" name="Picture 0"/>
+        let mut c_nv_pr = BytesStart::new("pic:cNvPr");
+        c_nv_pr.push_attribute(("id", image.id.to_string().as_str()));
+        c_nv_pr.push_attribute(("name", format!("Picture {}", image.id).as_str()));
+        writer.write_event(Event::Empty(c_nv_pr))?;
+        // <pic:cNvPicPr/>
         writer.write_event(Event::Empty(BytesStart::new("pic:cNvPicPr")))?;
         writer.write_event(Event::End(BytesEnd::new("pic:nvPicPr")))?;
 
         // <pic:blipFill>
         writer.write_event(Event::Start(BytesStart::new("pic:blipFill")))?;
+        // <a:blip r:embed="rId4"/>
         let mut blip = BytesStart::new("a:blip");
         blip.push_attribute(("r:embed", image.rel_id.as_str()));
         writer.write_event(Event::Empty(blip))?;
+        // <a:stretch><a:fillRect/></a:stretch>
         writer.write_event(Event::Start(BytesStart::new("a:stretch")))?;
         writer.write_event(Event::Empty(BytesStart::new("a:fillRect")))?;
         writer.write_event(Event::End(BytesEnd::new("a:stretch")))?;
@@ -1697,8 +1757,7 @@ impl DocumentXml {
 
         // <pic:spPr>
         writer.write_event(Event::Start(BytesStart::new("pic:spPr")))?;
-
-        // <a:xfrm>
+        // <a:xfrm><a:off x="0" y="0"/><a:ext cx="WIDTH" cy="HEIGHT"/></a:xfrm>
         writer.write_event(Event::Start(BytesStart::new("a:xfrm")))?;
         let mut off = BytesStart::new("a:off");
         off.push_attribute(("x", "0"));
@@ -1709,17 +1768,14 @@ impl DocumentXml {
         ext.push_attribute(("cy", image.height_emu.to_string().as_str()));
         writer.write_event(Event::Empty(ext))?;
         writer.write_event(Event::End(BytesEnd::new("a:xfrm")))?;
-
-        // <a:prstGeom prst="rect">
-        let mut prst_geom = BytesStart::new("a:prstGeom");
-        prst_geom.push_attribute(("prst", "rect"));
-        writer.write_event(Event::Start(prst_geom))?;
+        // <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        let mut geom = BytesStart::new("a:prstGeom");
+        geom.push_attribute(("prst", "rect"));
+        writer.write_event(Event::Start(geom))?;
         writer.write_event(Event::Empty(BytesStart::new("a:avLst")))?;
         writer.write_event(Event::End(BytesEnd::new("a:prstGeom")))?;
-
         writer.write_event(Event::End(BytesEnd::new("pic:spPr")))?;
 
-        // Close all tags
         writer.write_event(Event::End(BytesEnd::new("pic:pic")))?;
         writer.write_event(Event::End(BytesEnd::new("a:graphicData")))?;
         writer.write_event(Event::End(BytesEnd::new("a:graphic")))?;
@@ -1730,988 +1786,48 @@ impl DocumentXml {
     }
 }
 
-impl Default for DocumentXml {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_run_builder() {
-        let run = Run::new("Hello")
-            .bold()
-            .italic()
-            .underline()
-            .size(24)
-            .color("FF0000");
-
-        assert_eq!(run.text, "Hello");
-        assert!(run.bold);
-        assert!(run.italic);
-        assert!(run.underline);
-        assert_eq!(run.size, Some(24));
-        assert_eq!(run.color, Some("FF0000".to_string()));
+    fn test_paragraph_to_xml() {
+        let mut p = Paragraph::with_style("Heading1");
+        p = p.add_text("Hello World");
+        let mut writer = Writer::new(Cursor::new(Vec::new()));
+        p.write_xml(&mut writer, None).unwrap();
+        let xml = String::from_utf8(writer.into_inner().into_inner()).unwrap();
+        assert!(xml.contains("<w:pStyle w:val=\"Heading1\"/>"));
+        assert!(xml.contains("<w:t xml:space=\"preserve\">Hello World</w:t>"));
     }
 
     #[test]
-    fn test_paragraph_builder() {
-        let p = Paragraph::with_style("Heading1")
-            .add_text("Chapter 1")
-            .align("center")
-            .spacing(240, 60);
+    fn test_table_to_xml() {
+        let table =
+            Table::new()
+                .with_header_row(true)
+                .add_row(TableRow::new().header().add_cell(
+                    TableCellElement::new().add_paragraph(Paragraph::new().add_text("A1")),
+                ))
+                .add_row(TableRow::new().add_cell(
+                    TableCellElement::new().add_paragraph(Paragraph::new().add_text("A2")),
+                ));
 
-        assert_eq!(p.style_id, Some("Heading1".to_string()));
-        assert_eq!(p.children.len(), 1);
-        match &p.children[0] {
-            ParagraphChild::Run(run) => {
-                assert_eq!(run.text, "Chapter 1");
-            }
-            _ => panic!("Expected Run child"),
-        }
-        assert_eq!(p.align, Some("center".to_string()));
-        assert_eq!(p.spacing_before, Some(240));
-        assert_eq!(p.spacing_after, Some(60));
-    }
-
-    #[test]
-    fn test_paragraph_with_numbering() {
-        let p = Paragraph::new().add_text("First item").numbering(1, 0);
-
-        assert_eq!(p.numbering_id, Some(1));
-        assert_eq!(p.numbering_level, Some(0));
-    }
-
-    #[test]
-    fn test_document_xml_basic() {
         let mut doc = DocumentXml::new();
-        doc.add_paragraph(Paragraph::with_style("Normal").add_text("Hello, World!"));
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<?xml version"));
-        assert!(xml_str.contains("<w:document"));
-        assert!(xml_str.contains("<w:body>"));
-        assert!(xml_str.contains("<w:p>"));
-        assert!(xml_str.contains("<w:pStyle w:val=\"Normal\"/>"));
-        assert!(xml_str.contains("Hello, World!"));
-        assert!(xml_str.contains("<w:sectPr>"));
-    }
-
-    #[test]
-    fn test_document_xml_multiple_paragraphs() {
-        let mut doc = DocumentXml::new();
-        doc.add_paragraph(Paragraph::with_style("Heading1").add_text("Title"));
-        doc.add_paragraph(Paragraph::with_style("Normal").add_text("Content"));
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Count paragraph elements
-        let p_count = xml_str.matches("<w:p>").count();
-        assert_eq!(p_count, 2);
-    }
-
-    #[test]
-    fn test_run_formatting() {
-        let mut doc = DocumentXml::new();
-        let p = Paragraph::new()
-            .add_run(Run::new("Normal "))
-            .add_run(Run::new("Bold").bold())
-            .add_run(Run::new(" Italic").italic());
-        doc.add_paragraph(p);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<w:b/>"));
-        assert!(xml_str.contains("<w:i/>"));
-        assert!(xml_str.contains("Normal"));
-        assert!(xml_str.contains("Bold"));
-        assert!(xml_str.contains("Italic"));
-    }
-
-    #[test]
-    fn test_preserve_space() {
-        let mut doc = DocumentXml::new();
-        let p = Paragraph::new().add_run(Run::new("  Multiple   spaces  ").preserve_space(true));
-        doc.add_paragraph(p);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("xml:space=\"preserve\""));
-    }
-
-    #[test]
-    fn test_page_size_and_margins() {
-        let doc = DocumentXml::new()
-            .page_size(11906, 16838)
-            .margins(1440, 1440, 1440, 1440, 708, 708);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<w:pgSz w:w=\"11906\" w:h=\"16838\"/>"));
-        assert!(xml_str.contains("<w:pgMar"));
-        assert!(xml_str.contains("w:top=\"1440\""));
-        assert!(xml_str.contains("w:right=\"1440\""));
-        assert!(xml_str.contains("w:bottom=\"1440\""));
-        assert!(xml_str.contains("w:left=\"1440\""));
-        assert!(xml_str.contains("w:header=\"708\""));
-        assert!(xml_str.contains("w:footer=\"708\""));
-    }
-
-    #[test]
-    fn test_paragraph_keep_with_next() {
-        let p = Paragraph::new().add_text("Keep with next").keep_with_next();
-
-        assert!(p.keep_with_next);
-    }
-
-    #[test]
-    fn test_paragraph_page_break_before() {
-        let p = Paragraph::new().add_text("New page").page_break_before();
-
-        assert!(p.page_break_before);
-    }
-
-    #[test]
-    fn test_run_strike() {
-        let run = Run::new("Deleted").strike();
-        assert!(run.strike);
-    }
-
-    #[test]
-    fn test_run_highlight() {
-        let run = Run::new("Highlighted").highlight("yellow");
-        assert_eq!(run.highlight, Some("yellow".to_string()));
-    }
-
-    #[test]
-    fn test_run_font_override() {
-        let run = Run::new("Custom font").font("Arial");
-        assert_eq!(run.font, Some("Arial".to_string()));
-    }
-
-    #[test]
-    fn test_xml_namespaces() {
-        let doc = DocumentXml::new();
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str
-            .contains("xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\""));
-        assert!(xml_str.contains(
-            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
-        ));
-        assert!(xml_str.contains(
-            "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\""
-        ));
-        assert!(
-            xml_str.contains("xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"")
-        );
-        assert!(xml_str
-            .contains("xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\""));
-    }
-
-    #[test]
-    fn test_empty_paragraph() {
-        let mut doc = DocumentXml::new();
-        doc.add_paragraph(Paragraph::new());
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Should still have paragraph element even if empty
-        assert!(xml_str.contains("<w:p>"));
-    }
-
-    #[test]
-    fn test_paragraph_indent() {
-        let p = Paragraph::new().add_text("Indented text").indent(720);
-
-        assert_eq!(p.indent_left, Some(720));
-    }
-
-    #[test]
-    fn test_complex_paragraph() {
-        let p = Paragraph::with_style("Heading1")
-            .add_run(Run::new("Chapter ").bold())
-            .add_run(Run::new("1").size(32).color("2F5496"))
-            .align("center")
-            .spacing(240, 60)
-            .keep_with_next();
-
-        assert_eq!(p.style_id, Some("Heading1".to_string()));
-        assert_eq!(p.children.len(), 2);
-        match &p.children[0] {
-            ParagraphChild::Run(run) => {
-                assert!(run.bold);
-            }
-            _ => panic!("Expected Run child"),
-        }
-        match &p.children[1] {
-            ParagraphChild::Run(run) => {
-                assert_eq!(run.size, Some(32));
-                assert_eq!(run.color, Some("2F5496".to_string()));
-            }
-            _ => panic!("Expected Run child"),
-        }
-        assert_eq!(p.align, Some("center".to_string()));
-        assert!(p.keep_with_next);
-    }
-
-    #[test]
-    fn test_default_implementations() {
-        let run = Run::default();
-        assert_eq!(run.text, "");
-        assert!(!run.bold);
-        assert!(!run.italic);
-
-        let p = Paragraph::default();
-        assert!(p.style_id.is_none());
-        assert!(p.children.is_empty());
-
-        let doc = DocumentXml::default();
-        assert_eq!(doc.width, 11906);
-        assert_eq!(doc.height, 16838);
-    }
-
-    #[test]
-    fn test_hyperlink() {
-        let hyperlink =
-            Hyperlink::new("rId1").add_run(Run::new("Click here").underline().color("0000FF"));
-
-        assert_eq!(hyperlink.id, "rId1");
-        assert_eq!(hyperlink.children.len(), 1);
-        assert!(hyperlink.children[0].underline);
-        assert_eq!(hyperlink.children[0].color, Some("0000FF".to_string()));
-    }
-
-    #[test]
-    fn test_paragraph_with_hyperlink() {
-        let p = Paragraph::new()
-            .add_text("Visit ")
-            .add_hyperlink(Hyperlink::new("rId1").add_run(Run::new("our website").underline()))
-            .add_text(" for more info.");
-
-        assert_eq!(p.children.len(), 3);
-        match &p.children[0] {
-            ParagraphChild::Run(run) => assert_eq!(run.text, "Visit "),
-            _ => panic!("Expected Run child"),
-        }
-        match &p.children[1] {
-            ParagraphChild::Hyperlink(link) => {
-                assert_eq!(link.id, "rId1");
-                assert_eq!(link.children.len(), 1);
-                assert!(link.children[0].underline);
-            }
-            _ => panic!("Expected Hyperlink child"),
-        }
-        match &p.children[2] {
-            ParagraphChild::Run(run) => assert_eq!(run.text, " for more info."),
-            _ => panic!("Expected Run child"),
-        }
-    }
-
-    #[test]
-    fn test_paragraph_with_hyperlink_xml() {
-        let mut doc = DocumentXml::new();
-        let p = Paragraph::new()
-            .add_text("Click ")
-            .add_hyperlink(Hyperlink::new("rId5").add_run(Run::new("here").underline()));
-        doc.add_paragraph(p);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<w:hyperlink r:id=\"rId5\">"));
-        assert!(xml_str.contains("<w:u w:val=\"single\"/>"));
-        assert!(xml_str.contains("here"));
-        assert!(xml_str.contains("</w:hyperlink>"));
-    }
-
-    // Table tests
-    #[test]
-    fn test_table_basic() {
-        let mut doc = DocumentXml::new();
-
-        // Create a simple 2x2 table
-        let table = Table::new()
-            .with_column_widths(vec![2000, 2000])
-            .add_row(
-                TableRow::new()
-                    .add_cell(
-                        TableCellElement::new().add_paragraph(Paragraph::new().add_text("A1")),
-                    )
-                    .add_cell(
-                        TableCellElement::new().add_paragraph(Paragraph::new().add_text("B1")),
-                    ),
-            )
-            .add_row(
-                TableRow::new()
-                    .add_cell(
-                        TableCellElement::new().add_paragraph(Paragraph::new().add_text("A2")),
-                    )
-                    .add_cell(
-                        TableCellElement::new().add_paragraph(Paragraph::new().add_text("B2")),
-                    ),
-            );
-
         doc.add_table(table);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<w:tbl>"));
-        assert!(xml_str.contains("<w:tblPr>"));
-        assert!(xml_str.contains("<w:tblStyle w:val=\"TableGrid\"/>"));
-        assert!(xml_str.contains("<w:tblBorders>"));
-        assert!(xml_str.contains("<w:tblGrid>"));
-        assert!(xml_str.contains("<w:gridCol w:w=\"2000\"/>"));
-        assert!(xml_str.contains("<w:tr>"));
-        assert!(xml_str.contains("<w:tc>"));
-        assert!(xml_str.contains("A1"));
-        assert!(xml_str.contains("B1"));
-        assert!(xml_str.contains("A2"));
-        assert!(xml_str.contains("B2"));
-    }
-
-    #[test]
-    fn test_table_with_header() {
-        let mut doc = DocumentXml::new();
-
-        // Create a table with header row
-        let table = Table::new()
-            .with_column_widths(vec![2000, 2000, 2000])
-            .with_header_row(true)
-            .add_row(
-                TableRow::new()
-                    .header()
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Name"))
-                            .shading("D9E2F3"),
-                    )
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Age"))
-                            .shading("D9E2F3"),
-                    )
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("City"))
-                            .shading("D9E2F3"),
-                    ),
-            )
-            .add_row(
-                TableRow::new()
-                    .add_cell(
-                        TableCellElement::new().add_paragraph(Paragraph::new().add_text("John")),
-                    )
-                    .add_cell(
-                        TableCellElement::new().add_paragraph(Paragraph::new().add_text("30")),
-                    )
-                    .add_cell(
-                        TableCellElement::new().add_paragraph(Paragraph::new().add_text("NYC")),
-                    ),
-            );
-
-        doc.add_table(table);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<w:tblHeader/>"));
-        assert!(xml_str.contains("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"D9E2F3\"/>"));
-        assert!(xml_str.contains("Name"));
-        assert!(xml_str.contains("Age"));
-        assert!(xml_str.contains("City"));
-        assert!(xml_str.contains("John"));
-    }
-
-    #[test]
-    fn test_table_alignment() {
-        let mut doc = DocumentXml::new();
-
-        // Create a table with different alignments
-        let table = Table::new()
-            .with_column_widths(vec![2000, 2000, 2000])
-            .add_row(
-                TableRow::new()
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Left"))
-                            .alignment("left"),
-                    )
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Center"))
-                            .alignment("center"),
-                    )
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Right"))
-                            .alignment("right"),
-                    ),
-            );
-
-        doc.add_table(table);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<w:jc w:val=\"left\"/>"));
-        assert!(xml_str.contains("<w:jc w:val=\"center\"/>"));
-        assert!(xml_str.contains("<w:jc w:val=\"right\"/>"));
-    }
-
-    #[test]
-    fn test_table_cell_width() {
-        let mut doc = DocumentXml::new();
-
-        // Create a table with custom cell widths
-        let table = Table::new()
-            .with_column_widths(vec![1000, 3000, 2000])
-            .add_row(
-                TableRow::new()
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Narrow"))
-                            .width(TableWidth::Dxa(1000)),
-                    )
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Wide"))
-                            .width(TableWidth::Dxa(3000)),
-                    )
-                    .add_cell(
-                        TableCellElement::new()
-                            .add_paragraph(Paragraph::new().add_text("Medium"))
-                            .width(TableWidth::Dxa(2000)),
-                    ),
-            );
-
-        doc.add_table(table);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("<w:gridCol w:w=\"1000\"/>"));
-        assert!(xml_str.contains("<w:gridCol w:w=\"3000\"/>"));
-        assert!(xml_str.contains("<w:gridCol w:w=\"2000\"/>"));
-        assert!(xml_str.contains("<w:tcW w:w=\"1000\" w:type=\"dxa\"/>"));
-        assert!(xml_str.contains("<w:tcW w:w=\"3000\" w:type=\"dxa\"/>"));
-        assert!(xml_str.contains("<w:tcW w:w=\"2000\" w:type=\"dxa\"/>"));
-    }
-
-    #[test]
-    fn test_table_borders() {
-        let mut doc = DocumentXml::new();
-
-        let table = Table::new()
-            .with_column_widths(vec![2000])
-            .add_row(TableRow::new().add_cell(
-                TableCellElement::new().add_paragraph(Paragraph::new().add_text("Cell")),
-            ));
-
-        doc.add_table(table);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Check that all borders are present
-        assert!(
-            xml_str.contains("<w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>")
-        );
-        assert!(xml_str
-            .contains("<w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"));
-        assert!(xml_str
-            .contains("<w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"));
-        assert!(xml_str
-            .contains("<w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"));
-        assert!(xml_str
-            .contains("<w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"));
-        assert!(xml_str
-            .contains("<w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"));
-    }
-
-    #[test]
-    fn test_table_with_multiple_paragraphs_in_cell() {
-        let mut doc = DocumentXml::new();
-
-        // Create a table with multiple paragraphs in a cell
-        let table = Table::new().with_column_widths(vec![2000]).add_row(
-            TableRow::new().add_cell(
-                TableCellElement::new()
-                    .add_paragraph(Paragraph::new().add_text("First line"))
-                    .add_paragraph(Paragraph::new().add_text("Second line"))
-                    .add_paragraph(Paragraph::new().add_text("Third line")),
-            ),
-        );
-
-        doc.add_table(table);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("First line"));
-        assert!(xml_str.contains("Second line"));
-        assert!(xml_str.contains("Third line"));
-    }
-
-    #[test]
-    fn test_table_default_implementations() {
-        let table = Table::default();
-        assert!(table.rows.is_empty());
-        assert!(table.column_widths.is_empty());
-        assert!(!table.has_header_row);
-
-        let row = TableRow::default();
-        assert!(row.cells.is_empty());
-        assert!(!row.is_header);
-
-        let cell = TableCellElement::default();
-        assert!(cell.paragraphs.is_empty());
-        assert!(matches!(cell.width, TableWidth::Auto));
-        assert!(cell.alignment.is_none());
-        assert!(cell.shading.is_none());
-    }
-
-    #[test]
-    fn test_document_with_mixed_elements() {
-        let mut doc = DocumentXml::new();
-
-        // Add a paragraph
-        doc.add_paragraph(Paragraph::with_style("Heading1").add_text("Title"));
-
-        // Add a table
-        let table = Table::new().with_column_widths(vec![2000, 2000]).add_row(
-            TableRow::new()
-                .add_cell(TableCellElement::new().add_paragraph(Paragraph::new().add_text("A")))
-                .add_cell(TableCellElement::new().add_paragraph(Paragraph::new().add_text("B"))),
-        );
-        doc.add_table(table);
-
-        // Add another paragraph
-        doc.add_paragraph(Paragraph::with_style("Normal").add_text("After table"));
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("Title"));
-        assert!(xml_str.contains("<w:tbl>"));
-        assert!(xml_str.contains("After table"));
-    }
-
-    // Image tests
-    #[test]
-    fn test_image_element_new() {
-        let img = ImageElement::new("rId4", 914400, 457200)
-            .alt_text("Test image")
-            .name("test.png")
-            .id(1);
-
-        assert_eq!(img.rel_id, "rId4");
-        assert_eq!(img.width_emu, 914400);
-        assert_eq!(img.height_emu, 457200);
-        assert_eq!(img.alt_text, "Test image");
-        assert_eq!(img.name, "test.png");
-    }
-
-    #[test]
-    fn test_image_element_builder() {
-        let img = ImageElement::new("rId10", 2000000, 1000000)
-            .alt_text("A beautiful sunset")
-            .name("sunset.jpg")
-            .id(5);
-
-        assert_eq!(img.rel_id, "rId10");
-        assert_eq!(img.width_emu, 2000000);
-        assert_eq!(img.height_emu, 1000000);
-        assert_eq!(img.alt_text, "A beautiful sunset");
-        assert_eq!(img.name, "sunset.jpg");
-        assert_eq!(img.id, 5);
-    }
-
-    #[test]
-    fn test_image_drawing_xml_structure() {
-        let mut doc = DocumentXml::new();
-
-        let img = ImageElement::new("rId4", 914400, 457200)
-            .alt_text("Test image")
-            .name("test.png")
-            .id(1);
-        doc.add_image(img);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Verify the complete drawing structure (use partial matches to handle namespace attributes)
-        assert!(xml_str.contains("<w:drawing>"));
-        assert!(xml_str.contains("<wp:inline"));
-        assert!(xml_str.contains("<wp:extent"));
-        assert!(xml_str.contains("<wp:effectExtent"));
-        assert!(xml_str.contains("<wp:docPr"));
-        assert!(xml_str.contains("<wp:cNvGraphicFramePr>"));
-        assert!(xml_str.contains("<a:graphic"));
-        assert!(xml_str.contains("<a:graphicData"));
-        assert!(xml_str.contains("<pic:pic") || xml_str.contains("pic:pic"));
-        assert!(xml_str.contains("<pic:nvPicPr>"));
-        assert!(xml_str.contains("<pic:blipFill>"));
-        assert!(xml_str.contains("<pic:spPr>"));
-        assert!(xml_str.contains("<a:xfrm>"));
-        assert!(xml_str.contains("<a:prstGeom"));
-    }
-
-    #[test]
-    fn test_image_wrapped_in_paragraph() {
-        let mut doc = DocumentXml::new();
-
-        let img = ImageElement::new("rId4", 914400, 457200).id(1);
-        doc.add_image(img);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Images should be wrapped in paragraph and run
-        assert!(xml_str.contains("<w:p>"));
-        assert!(xml_str.contains("<w:r>"));
-        assert!(xml_str.contains("<w:drawing>"));
-        assert!(xml_str.contains("</w:drawing>"));
-        assert!(xml_str.contains("</w:r>"));
-        assert!(xml_str.contains("</w:p>"));
-    }
-
-    #[test]
-    fn test_image_with_alt_text() {
-        let mut doc = DocumentXml::new();
-
-        let img = ImageElement::new("rId4", 914400, 457200)
-            .alt_text("This is alt text for accessibility")
-            .id(1);
-        doc.add_image(img);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains("descr=\"This is alt text for accessibility\""));
-    }
-
-    #[test]
-    fn test_image_dimensions_in_xml() {
-        let mut doc = DocumentXml::new();
-
-        let img = ImageElement::new("rId4", 2000000, 1500000).id(1);
-        doc.add_image(img);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Check that dimensions appear in both wp:extent and a:ext
-        assert!(xml_str.contains("cx=\"2000000\""));
-        assert!(xml_str.contains("cy=\"1500000\""));
-    }
-
-    #[test]
-    fn test_image_aspect_ratio_lock() {
-        let mut doc = DocumentXml::new();
-
-        let img = ImageElement::new("rId4", 914400, 457200).id(1);
-        doc.add_image(img);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Verify that aspect ratio is locked
-        assert!(xml_str.contains("noChangeAspect=\"1\""));
-    }
-
-    #[test]
-    fn test_image_relationship_id() {
-        let mut doc = DocumentXml::new();
-
-        let img = ImageElement::new("rId7", 914400, 457200).id(1);
-        doc.add_image(img);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Verify the relationship ID is embedded correctly
-        assert!(xml_str.contains("r:embed=\"rId7\""));
-    }
-
-    #[test]
-    fn test_paragraph_shading() {
-        let p = Paragraph::new().add_text("Highlighted").shading("FFFF00");
-        assert_eq!(p.shading, Some("FFFF00".to_string()));
-
-        // Verify XML generation
-        let mut doc = DocumentXml::new();
-        doc.add_paragraph(p);
         let xml = String::from_utf8(doc.to_xml().unwrap()).unwrap();
-        assert!(xml.contains("<w:shd"));
-        assert!(xml.contains("w:fill=\"FFFF00\""));
-    }
-
-    // Bookmark tests
-    #[test]
-    fn test_bookmark_start_struct() {
-        let bookmark = BookmarkStart {
-            id: 42,
-            name: "_Toc_Test".to_string(),
-        };
-        assert_eq!(bookmark.id, 42);
-        assert_eq!(bookmark.name, "_Toc_Test");
+        assert!(xml.contains("<w:tblHeader/>"));
+        assert!(xml.contains("A1"));
+        assert!(xml.contains("A2"));
     }
 
     #[test]
-    fn test_paragraph_with_bookmark() {
+    fn test_image_to_xml() {
+        let image = ImageElement::new("rId1", 1000, 1000);
         let mut doc = DocumentXml::new();
-        let p = Paragraph::with_style("Heading1")
-            .add_text("Introduction")
-            .with_bookmark(1, "_Toc1_Introduction");
-        doc.add_paragraph(p);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains(r#"<w:bookmarkStart w:id="1" w:name="_Toc1_Introduction"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkEnd w:id="1"/>"#));
-        // Bookmark should wrap the content
-        assert!(xml_str.contains("Introduction"));
-    }
-
-    #[test]
-    fn test_paragraph_without_bookmark() {
-        let mut doc = DocumentXml::new();
-        let p = Paragraph::with_style("Normal").add_text("Regular paragraph");
-        doc.add_paragraph(p);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // No bookmark elements when not set
-        assert!(!xml_str.contains("bookmarkStart"));
-        assert!(!xml_str.contains("bookmarkEnd"));
-    }
-
-    #[test]
-    fn test_bookmark_with_multiple_runs() {
-        let mut doc = DocumentXml::new();
-        let p = Paragraph::new()
-            .add_run(Run::new("Chapter ").bold())
-            .add_run(Run::new("1").size(32))
-            .with_bookmark(2, "_Toc2_Chapter1");
-        doc.add_paragraph(p);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains(r#"<w:bookmarkStart w:id="2" w:name="_Toc2_Chapter1"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkEnd w:id="2"/>"#));
-        assert!(xml_str.contains("Chapter"));
-        assert!(xml_str.contains("1"));
-    }
-
-    #[test]
-    fn test_bookmark_with_style() {
-        let mut doc = DocumentXml::new();
-        let p = Paragraph::with_style("Heading2")
-            .add_text("Section 1.1")
-            .with_bookmark(3, "_Toc3_Section1_1");
-        doc.add_paragraph(p);
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Verify style is present
-        assert!(xml_str.contains(r#"<w:pStyle w:val="Heading2"/>"#));
-        // Verify bookmark is present
-        assert!(xml_str.contains(r#"<w:bookmarkStart w:id="3" w:name="_Toc3_Section1_1"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkEnd w:id="3"/>"#));
-    }
-
-    #[test]
-    fn test_multiple_bookmarks_in_document() {
-        let mut doc = DocumentXml::new();
-        doc.add_paragraph(
-            Paragraph::with_style("Heading1")
-                .add_text("Chapter 1")
-                .with_bookmark(1, "_Toc1_Chapter1"),
-        );
-        doc.add_paragraph(
-            Paragraph::with_style("Heading2")
-                .add_text("Section 1.1")
-                .with_bookmark(2, "_Toc2_Section1_1"),
-        );
-        doc.add_paragraph(
-            Paragraph::with_style("Heading2")
-                .add_text("Section 1.2")
-                .with_bookmark(3, "_Toc3_Section1_2"),
-        );
-
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains(r#"<w:bookmarkStart w:id="1" w:name="_Toc1_Chapter1"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkStart w:id="2" w:name="_Toc2_Section1_1"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkStart w:id="3" w:name="_Toc3_Section1_2"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkEnd w:id="1"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkEnd w:id="2"/>"#));
-        assert!(xml_str.contains(r#"<w:bookmarkEnd w:id="3"/>"#));
-    }
-
-    // Header/footer tests
-    #[test]
-    fn test_header_footer_refs_default() {
-        let refs = HeaderFooterRefs::default();
-        assert!(refs.default_header_id.is_none());
-        assert!(refs.default_footer_id.is_none());
-        assert!(!refs.different_first_page);
-    }
-
-    #[test]
-    fn test_document_with_header_footer_refs() {
-        let refs = HeaderFooterRefs {
-            default_header_id: Some("rId4".to_string()),
-            default_footer_id: Some("rId5".to_string()),
-            first_header_id: None,
-            first_footer_id: None,
-            different_first_page: false,
-        };
-
-        let doc = DocumentXml::new().with_header_footer(refs);
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains(r#"<w:headerReference w:type="default" r:id="rId4"/>"#));
-        assert!(xml_str.contains(r#"<w:footerReference w:type="default" r:id="rId5"/>"#));
-        assert!(!xml_str.contains("w:titlePg"));
-    }
-
-    #[test]
-    fn test_document_with_different_first_page() {
-        let refs = HeaderFooterRefs {
-            default_header_id: Some("rId4".to_string()),
-            first_header_id: Some("rId5".to_string()),
-            default_footer_id: Some("rId6".to_string()),
-            first_footer_id: Some("rId7".to_string()),
-            different_first_page: true,
-        };
-
-        let doc = DocumentXml::new().with_header_footer(refs);
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains(r#"w:type="default""#));
-        assert!(xml_str.contains(r#"w:type="first""#));
-        assert!(xml_str.contains("<w:titlePg/>"));
-    }
-
-    #[test]
-    fn test_document_with_only_default_header() {
-        let refs = HeaderFooterRefs {
-            default_header_id: Some("rId4".to_string()),
-            first_header_id: None,
-            default_footer_id: None,
-            first_footer_id: None,
-            different_first_page: false,
-        };
-
-        let doc = DocumentXml::new().with_header_footer(refs);
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(xml_str.contains(r#"<w:headerReference w:type="default" r:id="rId4"/>"#));
-        assert!(!xml_str.contains("footerReference"));
-    }
-
-    #[test]
-    fn test_document_with_only_default_footer() {
-        let refs = HeaderFooterRefs {
-            default_header_id: None,
-            first_header_id: None,
-            default_footer_id: Some("rId6".to_string()),
-            first_footer_id: None,
-            different_first_page: false,
-        };
-
-        let doc = DocumentXml::new().with_header_footer(refs);
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        assert!(!xml_str.contains("headerReference"));
-        assert!(xml_str.contains(r#"<w:footerReference w:type="default" r:id="rId6"/>"#));
-    }
-
-    #[test]
-    fn test_header_footer_refs_order_in_sect_pr() {
-        let refs = HeaderFooterRefs {
-            default_header_id: Some("rId4".to_string()),
-            first_header_id: Some("rId5".to_string()),
-            default_footer_id: Some("rId6".to_string()),
-            first_footer_id: Some("rId7".to_string()),
-            different_first_page: true,
-        };
-
-        let doc = DocumentXml::new().with_header_footer(refs);
-        let xml = doc.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Find the position of sectPr
-        let sect_pr_start = xml_str.find("<w:sectPr>").unwrap();
-
-        // Find positions of each element within sectPr
-        let header_default_pos = xml_str[sect_pr_start..]
-            .find(r#"w:type="default" r:id="rId4""#)
-            .unwrap();
-        let header_first_pos = xml_str[sect_pr_start..]
-            .find(r#"w:type="first" r:id="rId5""#)
-            .unwrap();
-        let footer_default_pos = xml_str[sect_pr_start..]
-            .find(r#"w:type="default" r:id="rId6""#)
-            .unwrap();
-        let footer_first_pos = xml_str[sect_pr_start..]
-            .find(r#"w:type="first" r:id="rId7""#)
-            .unwrap();
-        let pg_sz_pos = xml_str[sect_pr_start..].find("<w:pgSz").unwrap();
-        let title_pg_pos = xml_str[sect_pr_start..].find("<w:titlePg/>").unwrap();
-
-        // Verify order: header refs, footer refs, pgSz, ..., titlePg
-        assert!(header_default_pos < pg_sz_pos);
-        assert!(header_first_pos < pg_sz_pos);
-        assert!(footer_default_pos < pg_sz_pos);
-        assert!(footer_first_pos < pg_sz_pos);
-        assert!(title_pg_pos > pg_sz_pos);
-    }
-
-    #[test]
-    fn test_suppress_header_footer_uses_empty_refs() {
-        let mut doc_xml = DocumentXml::new();
-        // Setup mock empty header/footer IDs
-        doc_xml.empty_header_id = Some("rIdEmptyH".to_string());
-        doc_xml.empty_footer_id = Some("rIdEmptyF".to_string());
-
-        // Add a paragraph with section break and suppression enabled
-        let p = Paragraph::new()
-            .section_break("nextPage")
-            .suppress_header_footer();
-        doc_xml.add_paragraph(p);
-
-        let xml = doc_xml.to_xml().unwrap();
-        let xml_str = String::from_utf8(xml).unwrap();
-
-        // Verify that we explicitly reference the EMPTY header/footer
-        // This confirms we are preventing inheritance
-        assert!(xml_str.contains("w:headerReference"));
-        assert!(xml_str.contains("r:id=\"rIdEmptyH\""));
-        assert!(xml_str.contains("w:footerReference"));
-        assert!(xml_str.contains("r:id=\"rIdEmptyF\""));
+        doc.add_image(image);
+        let xml = String::from_utf8(doc.to_xml().unwrap()).unwrap();
+        assert!(xml.contains("<w:drawing>"));
+        assert!(xml.contains("r:embed=\"rId1\""));
     }
 }

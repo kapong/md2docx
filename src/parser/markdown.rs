@@ -16,6 +16,15 @@ static CODE_INCLUDE_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^\{!code:([^:}]+)(?::(\d+)-(\d+))?(?::([a-zA-Z0-9]+))?\}$").unwrap()
 });
 
+static HTML_ID_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<!--\s*\{#([a-zA-Z0-9_:-]+)\}\s*-->").unwrap());
+
+static TABLE_CAPTION_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^Table:\s*(.*)\s*\{#([a-zA-Z0-9_:-]+)\}$").unwrap());
+
+static TABLE_CAPTION_NO_ID_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^Table:\s*(.*)$").unwrap());
+
 /// Builder for footnote definitions
 struct FootnoteBuilder {
     name: String,
@@ -384,6 +393,72 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Table => {
                         if let Some(table) = table_builder.take() {
+                            let mut caption = None;
+                            let mut id = None;
+
+                            // Check if the preceding block was an HTML comment with an ID
+                            // or a paragraph that looks like a table caption.
+                            // We need to check the correct stack based on context.
+                            let last_block = if let Some(builder) = footnote_builder.as_mut() {
+                                builder.content.last_mut()
+                            } else if let Some(list) = list_stack.last_mut() {
+                                if let Some(item) = list.items.last_mut() {
+                                    item.content.last_mut()
+                                } else {
+                                    None
+                                }
+                            } else if let Some(BlockBuilder::BlockQuote(content)) =
+                                block_stack.last_mut()
+                            {
+                                content.last_mut()
+                            } else {
+                                blocks.last_mut()
+                            };
+
+                            if let Some(block) = last_block {
+                                match block {
+                                    Block::Html(html) => {
+                                        if let Some(cap) = HTML_ID_PATTERN.captures(html) {
+                                            id = Some(cap.get(1).unwrap().as_str().to_string());
+                                            // Mark for removal by changing to something else or we'll pop it
+                                        }
+                                    }
+                                    Block::Paragraph(inlines) => {
+                                        let text = extract_inline_text(inlines);
+                                        if let Some(cap) = TABLE_CAPTION_PATTERN.captures(&text) {
+                                            caption = Some(
+                                                cap.get(1).unwrap().as_str().trim().to_string(),
+                                            );
+                                            id = Some(cap.get(2).unwrap().as_str().to_string());
+                                        } else if let Some(cap) =
+                                            TABLE_CAPTION_NO_ID_PATTERN.captures(&text)
+                                        {
+                                            caption = Some(
+                                                cap.get(1).unwrap().as_str().trim().to_string(),
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            // If we found a caption or ID, we need to remove that last block
+                            if id.is_some() || caption.is_some() {
+                                if let Some(builder) = footnote_builder.as_mut() {
+                                    builder.content.pop();
+                                } else if let Some(list) = list_stack.last_mut() {
+                                    if let Some(item) = list.items.last_mut() {
+                                        item.content.pop();
+                                    }
+                                } else if let Some(BlockBuilder::BlockQuote(content)) =
+                                    block_stack.last_mut()
+                                {
+                                    content.pop();
+                                } else {
+                                    blocks.pop();
+                                }
+                            }
+
                             add_block_to_correct_stack(
                                 &mut blocks,
                                 &mut footnote_builder,
@@ -393,6 +468,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                                     headers: table.headers,
                                     alignments: table.alignments,
                                     rows: table.rows,
+                                    caption,
+                                    id,
                                 },
                             );
                         }
@@ -758,6 +835,35 @@ fn process_blocks_for_cross_refs(blocks: Vec<Block>) -> Vec<Block> {
             Block::Heading { level, content, id } => Block::Heading {
                 level,
                 content: process_cross_refs(content),
+                id,
+            },
+            Block::Table {
+                headers,
+                alignments,
+                rows,
+                caption,
+                id,
+            } => Block::Table {
+                headers: headers
+                    .into_iter()
+                    .map(|c| TableCell {
+                        content: process_cross_refs(c.content),
+                        is_header: c.is_header,
+                    })
+                    .collect(),
+                alignments,
+                rows: rows
+                    .into_iter()
+                    .map(|r| {
+                        r.into_iter()
+                            .map(|c| TableCell {
+                                content: process_cross_refs(c.content),
+                                is_header: c.is_header,
+                            })
+                            .collect()
+                    })
+                    .collect(),
+                caption,
                 id,
             },
             Block::BlockQuote(inner) => Block::BlockQuote(process_blocks_for_cross_refs(inner)),
@@ -1358,19 +1464,42 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_table() {
-        let md = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
+    fn test_parse_table_with_comment_id() {
+        let md = "<!-- {#tbl:users} -->\n| Name | Email |\n|------|-------|\n| John | john@example.com |";
+        let doc = parse_markdown(md);
+        // doc.blocks[0] should be the Table
+        assert_eq!(doc.blocks.len(), 1);
+        match &doc.blocks[0] {
+            Block::Table { id, .. } => {
+                assert_eq!(id.as_deref(), Some("tbl:users"));
+            }
+            _ => panic!("Expected Table, found {:?}", doc.blocks),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_with_caption_id() {
+        let md = "Table: User List {#tbl:users}\n| Name | Email |\n|------|-------|\n| John | john@example.com |";
         let doc = parse_markdown(md);
         assert_eq!(doc.blocks.len(), 1);
         match &doc.blocks[0] {
-            Block::Table {
-                headers,
-                alignments,
-                rows,
-            } => {
-                assert_eq!(headers.len(), 2);
-                assert_eq!(alignments.len(), 2);
-                assert_eq!(rows.len(), 1);
+            Block::Table { caption, id, .. } => {
+                assert_eq!(caption.as_deref(), Some("User List"));
+                assert_eq!(id.as_deref(), Some("tbl:users"));
+            }
+            _ => panic!("Expected Table"),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_with_caption_no_id() {
+        let md = "Table: My Caption\n| Col 1 |\n|-------|\n| val |";
+        let doc = parse_markdown(md);
+        assert_eq!(doc.blocks.len(), 1);
+        match &doc.blocks[0] {
+            Block::Table { caption, id, .. } => {
+                assert_eq!(caption.as_deref(), Some("My Caption"));
+                assert!(id.is_none());
             }
             _ => panic!("Expected Table"),
         }

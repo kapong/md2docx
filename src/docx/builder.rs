@@ -868,6 +868,11 @@ fn block_to_elements(
                         bottom: extent.bottom,
                     });
                 }
+
+                // Apply alignment
+                if !tmpl.alignment.is_empty() {
+                    img = img.with_alignment(&tmpl.alignment);
+                }
             }
 
             *ctx.image_id += 1;
@@ -1005,6 +1010,11 @@ fn block_to_elements(
                                 right: extent.right,
                                 bottom: extent.bottom,
                             });
+                        }
+
+                        // Apply alignment
+                        if !tmpl.alignment.is_empty() {
+                            img = img.with_alignment(&tmpl.alignment);
                         }
                     }
 

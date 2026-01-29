@@ -263,6 +263,23 @@ fn extract_from_xml(xml: &str) -> Result<ImageTemplate> {
 
         // Extract effect extent
         template.effect_extent = extract_effect_extent(&drawing_xml);
+
+        // Extract image paragraph alignment (w:jc from the paragraph containing the drawing)
+        if let Some(draw_pos) = drawing_pos {
+            // Find the start of the paragraph containing this drawing
+            if let Some(p_start) = xml[..draw_pos].rfind("<w:p") {
+                // Find the end of pPr section
+                if let Some(ppr_end) = xml[p_start..].find("</w:pPr>") {
+                    let ppr_xml = &xml[p_start..p_start + ppr_end];
+                    // Look for w:jc
+                    if let Some(jc_pos) = ppr_xml.find("<w:jc") {
+                        if let Some(val) = extract_attribute(&ppr_xml[jc_pos..], "w:val=") {
+                            template.alignment = val;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Find caption paragraph

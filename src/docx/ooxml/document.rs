@@ -820,6 +820,7 @@ pub struct ImageElement {
     pub border: Option<ImageBorderEffect>,
     pub shadow: Option<ImageShadowEffect>,
     pub effect_extent: Option<ImageEffectExtent>,
+    pub alignment: Option<String>, // "left", "center", "right"
 }
 
 /// Image border effect for OOXML generation
@@ -873,6 +874,7 @@ impl ImageElement {
             border: None,
             shadow: None,
             effect_extent: None,
+            alignment: None,
         }
     }
 
@@ -903,6 +905,11 @@ impl ImageElement {
 
     pub fn with_effect_extent(mut self, extent: ImageEffectExtent) -> Self {
         self.effect_extent = Some(extent);
+        self
+    }
+
+    pub fn with_alignment(mut self, alignment: &str) -> Self {
+        self.alignment = Some(alignment.to_string());
         self
     }
 
@@ -1283,14 +1290,24 @@ impl DocumentXml {
                     // Images need to be wrapped in a paragraph and run
                     writer.write_event(Event::Start(BytesStart::new("w:p")))?;
 
-                    // Add pPr with spacing 0 and single line spacing
+                    // Add pPr with spacing and alignment
                     writer.write_event(Event::Start(BytesStart::new("w:pPr")))?;
+
+                    // Alignment (w:jc)
+                    if let Some(ref align) = image.alignment {
+                        let mut jc = BytesStart::new("w:jc");
+                        jc.push_attribute(("w:val", align.as_str()));
+                        writer.write_event(Event::Empty(jc))?;
+                    }
+
+                    // Spacing
                     let mut spacing = BytesStart::new("w:spacing");
                     spacing.push_attribute(("w:before", "0"));
                     spacing.push_attribute(("w:after", "0"));
                     spacing.push_attribute(("w:line", "240"));
                     spacing.push_attribute(("w:lineRule", "auto"));
                     writer.write_event(Event::Empty(spacing))?;
+
                     writer.write_event(Event::End(BytesEnd::new("w:pPr")))?;
 
                     writer.write_event(Event::Start(BytesStart::new("w:r")))?;

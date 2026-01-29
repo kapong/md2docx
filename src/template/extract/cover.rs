@@ -636,11 +636,7 @@ fn parse_drawing_element(drawing_xml: &str) -> Result<Option<CoverElement>> {
 
         // Extract fill color
         let fill_color = if drawing_xml.contains("<a:solidFill>") {
-            if let Some(srgb) = extract_attribute(drawing_xml, "val=") {
-                Some(format!("#{}", srgb))
-            } else {
-                None
-            }
+            extract_attribute(drawing_xml, "val=").map(|srgb| format!("#{}", srgb))
         } else {
             None
         };

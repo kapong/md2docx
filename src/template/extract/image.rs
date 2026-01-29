@@ -309,8 +309,10 @@ fn extract_border(sp_pr_xml: &str) -> Option<ImageBorder> {
     if let Some(ln_pos) = sp_pr_xml.find("<a:ln") {
         if let Some(ln_end) = sp_pr_xml[ln_pos..].find("</a:ln>") {
             let ln_xml = &sp_pr_xml[ln_pos..ln_pos + ln_end + 7];
-            let mut border = ImageBorder::default();
-            border.fill_type = "solid".to_string();
+            let mut border = ImageBorder {
+                fill_type: "solid".to_string(),
+                ..Default::default()
+            };
 
             if let Some(width) = extract_attribute(ln_xml, "w=") {
                 border.width = width.parse().ok();

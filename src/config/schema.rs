@@ -3,7 +3,6 @@
 //! This module defines the structure of `md2docx.toml` configuration files
 //! and provides methods to load and parse them.
 
-use chrono::{Datelike, Timelike};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 

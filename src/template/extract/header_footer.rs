@@ -159,8 +159,7 @@ fn read_archive_file<R: Read + std::io::Seek>(
         .by_name(path)
         .map_err(|e| Error::Zip(format!("Failed to read {}: {}", path, e)))?;
     let mut content = String::new();
-    file.read_to_string(&mut content)
-        .map_err(|e| Error::Io(e))?;
+    file.read_to_string(&mut content).map_err(Error::Io)?;
     Ok(content)
 }
 
@@ -398,7 +397,7 @@ fn read_archive_bytes<R: Read + std::io::Seek>(
         .by_name(path)
         .map_err(|e| Error::Zip(format!("Failed to read {}: {}", path, e)))?;
     let mut data = Vec::new();
-    file.read_to_end(&mut data).map_err(|e| Error::Io(e))?;
+    file.read_to_end(&mut data).map_err(Error::Io)?;
     Ok(data)
 }
 

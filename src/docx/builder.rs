@@ -371,6 +371,7 @@ pub struct BuildResult {
         Vec<(String, crate::template::extract::header_footer::MediaFile)>,
     )>, // (footer_num, xml_bytes, media)
     pub has_toc_section_break: bool, // If true, there's a TOC section break needing empty refs
+    pub toc_builder: Option<TocBuilder>,
 }
 
 /// Check if a block is a heading
@@ -537,89 +538,6 @@ pub fn build_document(
         prev_block = Some(block);
     }
 
-    // Generate TOC elements
-    let toc_elements = toc_builder.generate_toc(&config.toc);
-
-    if !toc_elements.is_empty() {
-        if config.toc.after_cover {
-            // Find the first H1 heading that comes AFTER a section break
-            // This is the start of the first real chapter (after cover)
-            let mut found_section_break = false;
-            let first_chapter_h1_index = doc_xml.elements.iter().position(|el| {
-                if let DocElement::Paragraph(p) = el {
-                    if p.section_break.is_some() {
-                        found_section_break = true;
-                        false // Don't match section break itself
-                    } else if found_section_break && p.style_id.as_deref() == Some("Heading1") {
-                        true // Found H1 after section break
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            });
-
-            if let Some(idx) = first_chapter_h1_index {
-                let toc_count = toc_elements.len();
-                // Insert TOC elements BEFORE the first chapter H1
-                for (i, elem) in toc_elements.into_iter().enumerate() {
-                    doc_xml.elements.insert(idx + i, elem);
-                }
-
-                // Find the section break that ends Chapter 1 (first sectPr after Chapter 1's H1)
-                // and set it to restart page numbering at 1.
-                // This ensures Chapter 1 starts at page 1.
-                let chapter1_h1_pos = idx + toc_count;
-                let mut _found_break = false;
-
-                for i in (chapter1_h1_pos + 1)..doc_xml.elements.len() {
-                    if let DocElement::Paragraph(p) = &mut doc_xml.elements[i] {
-                        if p.section_break.is_some() {
-                            p.page_num_start = Some(1);
-                            _found_break = true;
-                            break;
-                        }
-                    }
-                }
-
-                // If no section break found (e.g., single chapter document),
-                // we'll need to rely on the body sectPr, but we don't have access to it here
-                // easily as it's generated in to_xml().
-                // However, most multi-chapter docs will have breaks.
-                // If it's a single chapter, the TOC section break handles the separation,
-                // and the body sectPr handles the chapter.
-                // But body sectPr doesn't support pgNumType restart in our current DocumentXml model
-                // (it takes refs from header_footer_refs).
-                // TODO: Add support for body sectPr page numbering restart if needed.
-            } else {
-                // Fallback: insert at beginning if no chapter H1 found after section break
-                let first_h1_index = doc_xml.elements.iter().position(|el| {
-                    if let DocElement::Paragraph(p) = el {
-                        p.style_id.as_deref() == Some("Heading1")
-                    } else {
-                        false
-                    }
-                });
-
-                if let Some(idx) = first_h1_index {
-                    for (i, elem) in toc_elements.into_iter().enumerate() {
-                        doc_xml.elements.insert(idx + i, elem);
-                    }
-                } else {
-                    for (i, elem) in toc_elements.into_iter().enumerate() {
-                        doc_xml.elements.insert(i, elem);
-                    }
-                }
-            }
-        } else {
-            // Prepend TOC at the beginning (old behavior)
-            for (i, elem) in toc_elements.into_iter().enumerate() {
-                doc_xml.elements.insert(i, elem);
-            }
-        }
-    }
-
     // Generate headers and footers
     // Note: Relationship IDs are NOT set here - they are assigned in lib.rs after
     // doc_rels.add_header() and add_footer() are called, which return the actual IDs.
@@ -763,6 +681,7 @@ pub fn build_document(
         headers,
         footers,
         has_toc_section_break: false,
+        toc_builder: Some(toc_builder),
     }
 }
 
@@ -3755,22 +3674,14 @@ End of document.
             None,
         );
 
+        // Check toc_builder
+        let toc_builder = result.toc_builder.as_ref().unwrap();
+        assert_eq!(toc_builder.entries().len(), 4);
+        assert_eq!(toc_builder.entries()[0].text, "Chapter 1");
+        assert_eq!(toc_builder.entries()[1].text, "Section 1.1");
+
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
-
-        // Should have: TOC title + 4 TOC entries + blank line + 4 headings
-        // Total: 1 (title) + 4 (entries) + 1 (blank) + 4 (headings) = 10 paragraphs
-        assert!(paragraphs.len() >= 9);
-
-        // First paragraph should be TOC title
-        assert_eq!(paragraphs[0].style_id, Some("TOCHeading".to_string()));
-
-        // TOC entries should have TOC1, TOC2, TOC3 styles
-        let toc_entries: Vec<_> = paragraphs
-            .iter()
-            .filter(|p| p.style_id.as_ref().map_or(false, |s| s.starts_with("TOC")))
-            .collect();
-        assert!(toc_entries.len() >= 4);
 
         // Headings should have bookmarks
         let heading_paragraphs: Vec<_> = paragraphs
@@ -3810,13 +3721,11 @@ End of document.
         let paragraphs = get_paragraphs(docx);
 
         // Should have: H1 + H2 = 2 paragraphs
-        // (no blank line inserted since H1 is a heading)
         assert_eq!(paragraphs.len(), 2);
 
-        // No TOC title
-        assert!(!paragraphs
-            .iter()
-            .any(|p| p.style_id == Some("TOCHeading".to_string())));
+        // toc_builder should still have entries! (Collection is independent of generation)
+        let toc_builder = result.toc_builder.as_ref().unwrap();
+        assert_eq!(toc_builder.entries().len(), 2);
     }
 
     #[test]
@@ -3842,23 +3751,14 @@ End of document.
             None,
         );
 
-        let docx = &result.document;
-        let paragraphs = get_paragraphs(docx);
+        // toc_builder should have ALL entries, filtering happens during generation
+        let toc_builder = result.toc_builder.as_ref().unwrap();
+        assert_eq!(toc_builder.entries().len(), 4);
 
-        // TOC entries should only include H1 and H2 (depth=2)
-        let toc_entries: Vec<_> = paragraphs
-            .iter()
-            .filter(|p| {
-                p.style_id
-                    .as_ref()
-                    .map_or(false, |s| s.starts_with("TOC") && s != "TOCHeading")
-            })
-            .collect();
-
-        // Should have TOC1 and TOC2 entries only (H3 and H4 filtered out)
-        assert_eq!(toc_entries.len(), 2);
-        assert_eq!(toc_entries[0].style_id, Some("TOC1".to_string()));
-        assert_eq!(toc_entries[1].style_id, Some("TOC2".to_string()));
+        // We can test generation directly
+        let toc_elements = toc_builder.generate_toc(&config.toc);
+        // title + field begin + 2 entries (h1, h2) + field end + section break = 6
+        assert_eq!(toc_elements.len(), 6);
     }
 
     #[test]
@@ -3915,24 +3815,13 @@ End of document.
             None,
         );
 
-        let docx = &result.document;
-        let paragraphs = get_paragraphs(docx);
-
-        // Find TOC entry
-        let toc_entry = paragraphs
-            .iter()
-            .find(|p| p.style_id == Some("TOC1".to_string()));
-
-        assert!(toc_entry.is_some());
+        let toc_builder = result.toc_builder.as_ref().unwrap();
+        let entry = &toc_builder.entries()[0];
+        assert_eq!(entry.level, 1);
 
         // TOC entry should contain the plain text (without formatting)
-        let text: String = toc_entry
-            .unwrap()
-            .iter_runs()
-            .map(|r| r.text.as_str())
-            .collect();
-        assert!(text.contains("Bold"));
-        assert!(text.contains("italic"));
+        assert!(entry.text.contains("Bold"));
+        assert!(entry.text.contains("italic"));
     }
 
     #[test]

@@ -794,8 +794,8 @@ fn finish_current_block_with_footnote(
     current_block: &mut Option<BlockBuilder>,
     blocks: &mut Vec<Block>,
     footnote_builder: &mut Option<FootnoteBuilder>,
-    list_stack: &mut Vec<ListBuilder>,
-    block_stack: &mut Vec<BlockBuilder>,
+    list_stack: &mut [ListBuilder],
+    block_stack: &mut [BlockBuilder],
 ) {
     if let Some(builder) = current_block.take() {
         let block = builder.build();
@@ -807,8 +807,8 @@ fn finish_current_block_with_footnote(
 fn add_block_to_correct_stack(
     blocks: &mut Vec<Block>,
     footnote_builder: &mut Option<FootnoteBuilder>,
-    list_stack: &mut Vec<ListBuilder>,
-    block_stack: &mut Vec<BlockBuilder>,
+    list_stack: &mut [ListBuilder],
+    block_stack: &mut [BlockBuilder],
     block: Block,
 ) {
     if let Some(builder) = footnote_builder {

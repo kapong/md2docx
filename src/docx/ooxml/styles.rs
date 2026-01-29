@@ -355,7 +355,7 @@ impl StylesDocument {
         self.font_config
             .as_ref()
             .and_then(|c| c.caption_size)
-            .unwrap_or_else(|| match self.lang {
+            .unwrap_or(match self.lang {
                 Language::English => 18, // 9pt
                 Language::Thai => 24,    // 12pt
             })

@@ -147,7 +147,7 @@ impl Default for CellStyle {
 }
 
 /// Border styles
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BorderStyles {
     /// Top border style
     pub top: BorderStyle,
@@ -180,19 +180,6 @@ impl Default for BorderStyle {
             style: "single".to_string(),
             color: "#000000".to_string(),
             width: 4, // 0.5pt
-        }
-    }
-}
-
-impl Default for BorderStyles {
-    fn default() -> Self {
-        Self {
-            top: BorderStyle::default(),
-            bottom: BorderStyle::default(),
-            left: BorderStyle::default(),
-            right: BorderStyle::default(),
-            inside_h: BorderStyle::default(),
-            inside_v: BorderStyle::default(),
         }
     }
 }

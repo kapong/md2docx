@@ -69,20 +69,20 @@ fn read_jpeg_dimensions(data: &[u8]) -> Option<ImageDimensions> {
         if data[i] == 0xFF {
             let marker = data[i + 1];
             // SOF0, SOF1, SOF2 markers contain dimensions
-            if marker == 0xC0 || marker == 0xC1 || marker == 0xC2 {
-                if i + 9 < data.len() {
-                    let height = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
-                    let width = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
-                    return Some(ImageDimensions { width, height });
-                }
+            if (marker == 0xC0 || marker == 0xC1 || marker == 0xC2) && i + 9 < data.len() {
+                let height = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
+                let width = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
+                return Some(ImageDimensions { width, height });
             }
             // Skip marker segment
-            if marker != 0x00 && marker != 0x01 && (marker < 0xD0 || marker > 0xD9) {
-                if i + 3 < data.len() {
-                    let len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
-                    i += len + 2;
-                    continue;
-                }
+            if marker != 0x00
+                && marker != 0x01
+                && !(0xD0..=0xD9).contains(&marker)
+                && i + 3 < data.len()
+            {
+                let len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
+                i += len + 2;
+                continue;
             }
         }
         i += 1;

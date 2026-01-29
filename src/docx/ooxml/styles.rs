@@ -598,6 +598,56 @@ impl StylesDocument {
                 .spacing(60, 60),
         );
 
+        // Header style (for header paragraphs)
+        // Tab positions: center at 4513, right at 9026 (for A4 paper)
+        self.add_style(
+            Style::new("Header", "header", StyleType::Paragraph)
+                .ui_priority(99)
+                .based_on("Normal")
+                .font(
+                    self.lang.default_ascii_font(),
+                    self.lang.default_ascii_font(),
+                    self.lang.default_cs_font(),
+                )
+                .size(self.lang.default_font_size())
+                .size_cs(self.lang.default_cs_size())
+                .add_tab(TabStop {
+                    position: 4513,
+                    alignment: "center".to_string(),
+                    leader: None,
+                })
+                .add_tab(TabStop {
+                    position: 9026,
+                    alignment: "right".to_string(),
+                    leader: None,
+                }),
+        );
+
+        // Footer style (for footer paragraphs)
+        // Same tab positions as Header
+        self.add_style(
+            Style::new("Footer", "footer", StyleType::Paragraph)
+                .ui_priority(99)
+                .based_on("Normal")
+                .font(
+                    self.lang.default_ascii_font(),
+                    self.lang.default_ascii_font(),
+                    self.lang.default_cs_font(),
+                )
+                .size(self.lang.default_font_size())
+                .size_cs(self.lang.default_cs_size())
+                .add_tab(TabStop {
+                    position: 4513,
+                    alignment: "center".to_string(),
+                    leader: None,
+                })
+                .add_tab(TabStop {
+                    position: 9026,
+                    alignment: "right".to_string(),
+                    leader: None,
+                }),
+        );
+
         // CodeFilename style (filename above code blocks)
         self.add_style(
             Style::new("CodeFilename", "Code Filename", StyleType::Paragraph)
@@ -1632,7 +1682,7 @@ mod tests {
     #[test]
     fn test_styles_document_english() {
         let doc = StylesDocument::new(Language::English);
-        assert_eq!(doc.styles.len(), 20); // All required styles (including TOCHeading, BodyText, and CodeFilename)
+        assert_eq!(doc.styles.len(), 22); // All required styles (including TOCHeading, BodyText, CodeFilename, Header, and Footer)
 
         // Check Normal style
         let normal = doc.styles.iter().find(|s| s.id == "Normal").unwrap();
@@ -1665,12 +1715,36 @@ mod tests {
         assert_eq!(toc1.tabs[0].alignment, "right");
         assert_eq!(toc1.tabs[0].leader, Some("dot".to_string()));
         assert_eq!(toc1.tabs[0].position, 9026);
+
+        // Check Header style has correct tab stops
+        let header = doc.styles.iter().find(|s| s.id == "Header").unwrap();
+        assert_eq!(header.style_type, StyleType::Paragraph);
+        assert_eq!(header.based_on, Some("Normal".to_string()));
+        assert_eq!(header.tabs.len(), 2);
+        assert_eq!(header.tabs[0].position, 4513);
+        assert_eq!(header.tabs[0].alignment, "center");
+        assert_eq!(header.tabs[0].leader, None);
+        assert_eq!(header.tabs[1].position, 9026);
+        assert_eq!(header.tabs[1].alignment, "right");
+        assert_eq!(header.tabs[1].leader, None);
+
+        // Check Footer style has correct tab stops
+        let footer = doc.styles.iter().find(|s| s.id == "Footer").unwrap();
+        assert_eq!(footer.style_type, StyleType::Paragraph);
+        assert_eq!(footer.based_on, Some("Normal".to_string()));
+        assert_eq!(footer.tabs.len(), 2);
+        assert_eq!(footer.tabs[0].position, 4513);
+        assert_eq!(footer.tabs[0].alignment, "center");
+        assert_eq!(footer.tabs[0].leader, None);
+        assert_eq!(footer.tabs[1].position, 9026);
+        assert_eq!(footer.tabs[1].alignment, "right");
+        assert_eq!(footer.tabs[1].leader, None);
     }
 
     #[test]
     fn test_styles_document_thai() {
         let doc = StylesDocument::new(Language::Thai);
-        assert_eq!(doc.styles.len(), 20); // All required styles (including TOCHeading, BodyText, and CodeFilename)
+        assert_eq!(doc.styles.len(), 22); // All required styles (including TOCHeading, BodyText, CodeFilename, Header, and Footer)
 
         // Check Normal style uses Thai font
         let normal = doc.styles.iter().find(|s| s.id == "Normal").unwrap();

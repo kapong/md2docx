@@ -282,6 +282,15 @@ impl ImageContext {
     }
 }
 
+/// Document metadata from md2docx.toml [document] section
+#[derive(Debug, Clone, Default)]
+pub struct DocumentMeta {
+    pub title: String,
+    pub subtitle: String,
+    pub author: String,
+    pub date: String,
+}
+
 /// Document build configuration
 #[derive(Debug, Clone, Default)]
 pub struct DocumentConfig {
@@ -297,6 +306,10 @@ pub struct DocumentConfig {
     /// If true, include all headings in TOC even if they appear before a thematic break
     /// (Used when cover page is handled via template system)
     pub process_all_headings: bool,
+    /// Extracted header/footer template from template directory
+    pub header_footer_template: Option<crate::template::extract::HeaderFooterTemplate>,
+    /// Document metadata for placeholder replacement
+    pub document_meta: Option<DocumentMeta>,
 }
 
 /// Result of building a document, including tracked images, hyperlinks, footnotes, and headers/footers
@@ -307,9 +320,17 @@ pub struct BuildResult {
     pub hyperlinks: HyperlinkContext,
     pub footnotes: FootnotesXml,
     pub numbering: NumberingContext,
-    pub headers: Vec<(u32, Vec<u8>)>, // (header_num, xml_bytes)
-    pub footers: Vec<(u32, Vec<u8>)>, // (footer_num, xml_bytes)
-    pub has_toc_section_break: bool,  // If true, there's a TOC section break needing empty refs
+    pub headers: Vec<(
+        u32,
+        Vec<u8>,
+        Vec<(String, crate::template::extract::header_footer::MediaFile)>,
+    )>, // (header_num, xml_bytes, media)
+    pub footers: Vec<(
+        u32,
+        Vec<u8>,
+        Vec<(String, crate::template::extract::header_footer::MediaFile)>,
+    )>, // (footer_num, xml_bytes, media)
+    pub has_toc_section_break: bool, // If true, there's a TOC section break needing empty refs
 }
 
 /// Check if a block is a heading
@@ -573,35 +594,131 @@ pub fn build_document(
     // Generate headers and footers
     // Note: Relationship IDs are NOT set here - they are assigned in lib.rs after
     // doc_rels.add_header() and add_footer() are called, which return the actual IDs.
-    if !config.header.is_empty() {
-        // Generate default header (header1.xml)
-        let header_xml = HeaderXml::new(config.header.clone(), &config.title);
-        headers.push((1, header_xml.to_xml().unwrap()));
-        // Relationship ID will be set in lib.rs
+    if let Some(ref hf_template) = config.header_footer_template {
+        // Use template-based generation
+        let ctx = crate::template::render::header_footer::HeaderFooterContext {
+            title: config
+                .document_meta
+                .as_ref()
+                .map(|m| m.title.clone())
+                .unwrap_or_else(|| config.title.clone()),
+            subtitle: config
+                .document_meta
+                .as_ref()
+                .map(|m| m.subtitle.clone())
+                .unwrap_or_default(),
+            author: config
+                .document_meta
+                .as_ref()
+                .map(|m| m.author.clone())
+                .unwrap_or_default(),
+            date: config
+                .document_meta
+                .as_ref()
+                .map(|m| m.date.clone())
+                .unwrap_or_default(),
+        };
 
-        // Always generate empty header (ID 2) for suppression purposes
-        // (We reuse this for first page if different_first_page is set)
-        let empty_header = HeaderXml::new(HeaderConfig::empty(), "");
-        headers.push((2, empty_header.to_xml().unwrap()));
+        // Render default header
+        if let Ok(Some(rendered)) =
+            crate::template::render::header_footer::render_default_header(hf_template, &ctx, 100)
+        {
+            headers.push((1, rendered.xml, rendered.media));
+        }
 
-        if config.different_first_page {
+        // Render first page header (if different first page)
+        if hf_template.different_first_page {
+            if let Ok(Some(rendered)) =
+                crate::template::render::header_footer::render_first_page_header(
+                    hf_template,
+                    &ctx,
+                    200,
+                )
+            {
+                headers.push((2, rendered.xml, rendered.media));
+            }
+            header_footer_refs.different_first_page = true;
+        } else if config.different_first_page {
+            // Template doesn't have different first page, but config requests it
+            // Generate empty header for suppression
+            let empty_header = HeaderXml::new(HeaderConfig::empty(), "");
+            headers.push((2, empty_header.to_xml().unwrap(), Vec::new()));
             header_footer_refs.different_first_page = true;
         }
-    }
 
-    if !config.footer.is_empty() {
-        // Generate default footer (footer1.xml)
-        let footer_xml = FooterXml::new(config.footer.clone(), &config.title);
-        footers.push((1, footer_xml.to_xml().unwrap()));
-        // Relationship ID will be set in lib.rs
+        // Render default footer
+        if let Ok(Some(rendered)) =
+            crate::template::render::header_footer::render_default_footer(hf_template, &ctx, 300)
+        {
+            footers.push((1, rendered.xml, rendered.media));
+        }
 
-        // Always generate empty footer (ID 2) for suppression purposes
-        // (We reuse this for first page if different_first_page is set)
-        let empty_footer = FooterXml::new(FooterConfig::empty(), "");
-        footers.push((2, empty_footer.to_xml().unwrap()));
-
-        if config.different_first_page {
+        // Render first page footer (if different first page)
+        if hf_template.different_first_page {
+            if let Ok(Some(rendered)) =
+                crate::template::render::header_footer::render_first_page_footer(
+                    hf_template,
+                    &ctx,
+                    400,
+                )
+            {
+                footers.push((2, rendered.xml, rendered.media));
+            }
             header_footer_refs.different_first_page = true;
+        } else if config.different_first_page {
+            // Template doesn't have different first page, but config requests it
+            // Generate empty footer for suppression
+            let empty_footer = FooterXml::new(FooterConfig::empty(), "");
+            footers.push((2, empty_footer.to_xml().unwrap(), Vec::new()));
+            header_footer_refs.different_first_page = true;
+        }
+
+        // Always generate truly empty header/footer (ID 3) for cover/TOC suppression
+        // These are used when we need sections with NO headers/footers at all
+        // (separate from first-page headers which may have content)
+        let suppression_header = HeaderXml::new(HeaderConfig::empty(), "");
+        headers.push((3, suppression_header.to_xml().unwrap(), Vec::new()));
+
+        let suppression_footer = FooterXml::new(FooterConfig::empty(), "");
+        footers.push((3, suppression_footer.to_xml().unwrap(), Vec::new()));
+    } else {
+        // Fall back to config-based generation (existing code)
+        if !config.header.is_empty() {
+            // Generate default header (header1.xml)
+            let header_xml = HeaderXml::new(config.header.clone(), &config.title);
+            headers.push((1, header_xml.to_xml().unwrap(), Vec::new()));
+            // Relationship ID will be set in lib.rs
+
+            // Generate empty header (ID 2) for first page if different_first_page is set
+            let empty_header = HeaderXml::new(HeaderConfig::empty(), "");
+            headers.push((2, empty_header.to_xml().unwrap(), Vec::new()));
+
+            // Also generate header3 for cover/TOC suppression (same as header2 but separate file)
+            let suppression_header = HeaderXml::new(HeaderConfig::empty(), "");
+            headers.push((3, suppression_header.to_xml().unwrap(), Vec::new()));
+
+            if config.different_first_page {
+                header_footer_refs.different_first_page = true;
+            }
+        }
+
+        if !config.footer.is_empty() {
+            // Generate default footer (footer1.xml)
+            let footer_xml = FooterXml::new(config.footer.clone(), &config.title);
+            footers.push((1, footer_xml.to_xml().unwrap(), Vec::new()));
+            // Relationship ID will be set in lib.rs
+
+            // Generate empty footer (ID 2) for first page if different_first_page is set
+            let empty_footer = FooterXml::new(FooterConfig::empty(), "");
+            footers.push((2, empty_footer.to_xml().unwrap(), Vec::new()));
+
+            // Also generate footer3 for cover/TOC suppression (same as footer2 but separate file)
+            let suppression_footer = FooterXml::new(FooterConfig::empty(), "");
+            footers.push((3, suppression_footer.to_xml().unwrap(), Vec::new()));
+
+            if config.different_first_page {
+                header_footer_refs.different_first_page = true;
+            }
         }
     }
 
@@ -2770,7 +2887,8 @@ End of document.
         assert_eq!(id, "rId6");
         assert_eq!(ctx.images.len(), 1);
         assert_eq!(ctx.images[0].src, "test.png");
-        assert_eq!(ctx.images[0].filename, "image1.png");
+        // Filename includes rel_id for uniqueness
+        assert_eq!(ctx.images[0].filename, "image_rId6.png");
     }
 
     #[test]
@@ -2783,8 +2901,9 @@ End of document.
         assert_eq!(id1, "rId6");
         assert_eq!(id2, "rId7");
         assert_eq!(ctx.images.len(), 2);
-        assert_eq!(ctx.images[0].filename, "image1.png");
-        assert_eq!(ctx.images[1].filename, "image2.png");
+        // Filenames include rel_id for uniqueness
+        assert_eq!(ctx.images[0].filename, "image_rId6.png");
+        assert_eq!(ctx.images[1].filename, "image_rId7.png");
     }
 
     #[test]
@@ -2910,10 +3029,12 @@ End of document.
         let mut rel_manager = crate::docx::RelIdManager::new();
         let result = build_document(&parsed, Language::English, &config, &mut rel_manager);
 
-        // Should have two headers and two footers (default + empty/first)
-        // We always generate empty headers/footers for suppression purposes
-        assert_eq!(result.headers.len(), 2);
-        assert_eq!(result.footers.len(), 2);
+        // Should have three headers and three footers:
+        // 1. Default header/footer with content
+        // 2. Empty header/footer for first page (when different_first_page is set)
+        // 3. Suppression header/footer for cover/TOC (always empty)
+        assert_eq!(result.headers.len(), 3);
+        assert_eq!(result.footers.len(), 3);
 
         // Check header XML
         let header_xml = String::from_utf8(result.headers[0].1.clone()).unwrap();
@@ -2948,9 +3069,12 @@ End of document.
         let mut rel_manager = crate::docx::RelIdManager::new();
         let result = build_document(&parsed, Language::English, &config, &mut rel_manager);
 
-        // Should have two headers and two footers (default + first page)
-        assert_eq!(result.headers.len(), 2);
-        assert_eq!(result.footers.len(), 2);
+        // Should have three headers and three footers:
+        // 1. Default header/footer with content
+        // 2. First page header/footer (empty when different_first_page)
+        // 3. Suppression header/footer for cover/TOC (always empty)
+        assert_eq!(result.headers.len(), 3);
+        assert_eq!(result.footers.len(), 3);
 
         // Document should have different first page enabled
         assert!(result.document.header_footer_refs.different_first_page);
@@ -3121,7 +3245,13 @@ End of document.
     fn test_toc_with_explicit_id() {
         let md = "# Introduction {#intro}\n\n## Getting Started {#start}";
         let parsed = parse_markdown_with_frontmatter(md);
-        let result = build_document(&parsed, Language::English, &DocumentConfig::default());
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &DocumentConfig::default(),
+            &mut rel_manager,
+        );
 
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -3153,7 +3283,13 @@ End of document.
     fn test_toc_with_formatted_heading() {
         let md = "# **Bold** and *italic* heading";
         let parsed = parse_markdown_with_frontmatter(md);
-        let result = build_document(&parsed, Language::English, &DocumentConfig::default());
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &DocumentConfig::default(),
+            &mut rel_manager,
+        );
 
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -3179,7 +3315,13 @@ End of document.
     fn test_build_document_image_with_alt_text() {
         let md = "![This is alt text](image.png)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let result = build_document(&parsed, Language::English, &DocumentConfig::default());
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &DocumentConfig::default(),
+            &mut rel_manager,
+        );
 
         if let Some(DocElement::Image(img)) = result.document.elements.first() {
             assert_eq!(img.alt_text, "This is alt text");
@@ -3196,7 +3338,13 @@ End of document.
         // Block::Image is only created for standalone images (not yet implemented)
         let md = "> Quote with image\n> ![Image](img.png)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let result = build_document(&parsed, Language::English, &DocumentConfig::default());
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &DocumentConfig::default(),
+            &mut rel_manager,
+        );
 
         // Parser creates BlockQuote with Paragraphs containing Inline::Image
         // The builder doesn't extract Inline::Image to Block::Image yet
@@ -3214,11 +3362,16 @@ End of document.
     fn test_build_result_structure() {
         let md = "# Test\n\nSome text";
         let parsed = parse_markdown_with_frontmatter(md);
-        let result = build_document(&parsed, Language::English, &DocumentConfig::default());
+        let mut rel_manager = crate::docx::RelIdManager::new();
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &DocumentConfig::default(),
+            &mut rel_manager,
+        );
 
         // Verify BuildResult structure
         assert!(result.document.elements.len() > 0);
-        assert_eq!(result.images.next_id, 1); // No images added
         assert_eq!(result.images.images.len(), 0);
     }
 }

@@ -212,6 +212,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
+                // Load header/footer template if template directory exists
+                let header_footer_template =
+                    if let Some(ref template_dir) = project_config.template.dir {
+                        let template_path = input_dir.join(template_dir);
+                        let hf_path = template_path.join("header-footer.docx");
+                        if hf_path.exists() {
+                            println!("Loading header/footer template...");
+                            match md2docx::template::extract::header_footer::extract(&hf_path) {
+                                Ok(template) => {
+                                    println!(
+                                        "  Different first page: {}",
+                                        template.different_first_page
+                                    );
+                                    Some(template)
+                                }
+                                Err(e) => {
+                                    eprintln!("Warning: Failed to load header-footer.docx: {}", e);
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                // Create DocumentMeta from project_config
+                let document_meta = md2docx::DocumentMeta {
+                    title: project_config.document.title.clone(),
+                    subtitle: project_config.document.subtitle.clone(),
+                    author: project_config.document.author.clone(),
+                    date: project_config.document.date.clone(),
+                };
+
                 let doc_config = DocumentConfig {
                     title: project_config.document.title.clone(),
                     toc: md2docx::docx::TocConfig {
@@ -226,6 +261,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     template_dir: None,
                     id_offset: 0,
                     process_all_headings: false,
+                    header_footer_template,
+                    document_meta: Some(document_meta),
                 };
 
                 (combined, lang, doc_config, Some(input_dir.clone()))

@@ -2,7 +2,7 @@
 //!
 //! This example demonstrates how to:
 //! - Read configuration from md2docx.toml
-//! - Load templates from template directory (cover.docx, table.docx, etc.)
+//! - Load templates from template directory (cover.docx, table.docx, header-footer.docx, etc.)
 //! - Apply templates to the generated document
 //! - Discover markdown files using config patterns
 //! - Generate a DOCX file with all settings from config and templates
@@ -14,7 +14,8 @@ use md2docx::discovery::DiscoveredProject;
 use md2docx::docx::ooxml::{FooterConfig, HeaderConfig, HeaderFooterField};
 use md2docx::docx::TocConfig;
 use md2docx::{
-    markdown_to_docx_with_templates, DocumentConfig, Language, PlaceholderContext, TemplateDir,
+    markdown_to_docx_with_templates, DocumentConfig, DocumentMeta, Language, PlaceholderContext,
+    TemplateDir,
 };
 use std::fs;
 use std::path::Path;
@@ -41,13 +42,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Load templates from template directory if configured
-    let (template_set, template_loaded) =
+    let (template_set, template_loaded, header_footer_template) =
         if let Some(template_dir) = project_config.template.dir.as_ref() {
             let template_path = base_dir.join(template_dir);
             if template_path.exists() {
                 println!("🎨 Loading templates from: {:?}", template_path);
-                let template_dir = TemplateDir::load(&template_path)?;
-                let templates = template_dir.load_all()?;
+                let template_dir_obj = TemplateDir::load(&template_path)?;
+                let templates = template_dir_obj.load_all()?;
 
                 if templates.has_cover() {
                     println!("   ✓ Cover template found (cover.docx)");
@@ -62,13 +63,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("   ✓ Header/Footer template found (header-footer.docx)");
                 }
 
-                (Some(templates), true)
+                // Load header/footer template separately for DocumentConfig
+                let hf_template = {
+                    let hf_path = template_path.join("header-footer.docx");
+                    if hf_path.exists() {
+                        println!("   Loading header/footer template...");
+                        match md2docx::template::extract::header_footer::extract(&hf_path) {
+                            Ok(template) => {
+                                println!(
+                                    "     Different first page: {}",
+                                    template.different_first_page
+                                );
+                                Some(template)
+                            }
+                            Err(e) => {
+                                eprintln!("   ⚠️  Failed to load header-footer.docx: {}", e);
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                };
+
+                (Some(templates), true, hf_template)
             } else {
                 println!("⚠️  Template directory not found: {:?}", template_path);
-                (None, false)
+                (None, false, None)
             }
         } else {
-            (None, false)
+            (None, false, None)
         };
 
     // Discover files using config patterns
@@ -210,6 +234,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         id_offset: 0,
         // When using templates, cover is handled separately, so include all headings in TOC
         process_all_headings: template_loaded,
+        header_footer_template,
+        document_meta: Some(DocumentMeta {
+            title: project_config.document.title.clone(),
+            subtitle: project_config.document.subtitle.clone(),
+            author: project_config.document.author.clone(),
+            date: project_config.date(),
+        }),
     };
 
     // Extract inside content from cover.md (content after frontmatter)

@@ -160,6 +160,20 @@ impl<W: Write + Seek> Packager<W> {
         Ok(())
     }
 
+    /// Add a header relationships file to the archive
+    pub fn add_header_rels(&mut self, header_num: u32, content: &[u8]) -> Result<()> {
+        let path = format!("word/_rels/header{}.xml.rels", header_num);
+        self.write_file(&path, content)?;
+        Ok(())
+    }
+
+    /// Add a footer relationships file to the archive
+    pub fn add_footer_rels(&mut self, footer_num: u32, content: &[u8]) -> Result<()> {
+        let path = format!("word/_rels/footer{}.xml.rels", footer_num);
+        self.write_file(&path, content)?;
+        Ok(())
+    }
+
     /// Add a numbering file to the archive
     pub fn add_numbering(&mut self, content: &[u8]) -> Result<()> {
         self.write_file("word/numbering.xml", content)?;
@@ -464,6 +478,82 @@ mod tests {
         // Add footnotes
         let footnotes_data = b"<w:footnotes xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:footnote w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote><w:footnote w:id=\"1\"><w:p><w:r><w:t>This is a footnote</w:t></w:r></w:p></w:footnote></w:footnotes>";
         packager.add_footnotes(footnotes_data).unwrap();
+
+        // Finish
+        let buffer = packager.finish().unwrap();
+        let zip_data = buffer.into_inner();
+
+        assert!(!zip_data.is_empty());
+        assert_eq!(&zip_data[0..4], b"PK\x03\x04");
+    }
+
+    #[test]
+    fn test_packager_with_header_rels() {
+        let document = DocumentXml::new();
+        let styles = StylesDocument::new(Language::English);
+        let content_types = ContentTypes::new();
+        let rels = Relationships::root_rels();
+        let doc_rels = Relationships::document_rels();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut packager = Packager::new(buffer);
+
+        // Package components
+        packager
+            .package(
+                &document,
+                &styles,
+                &content_types,
+                &rels,
+                &doc_rels,
+                Language::English,
+            )
+            .unwrap();
+
+        // Add header rels
+        let rels_data = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>"#;
+        packager.add_header_rels(1, rels_data).unwrap();
+
+        // Finish
+        let buffer = packager.finish().unwrap();
+        let zip_data = buffer.into_inner();
+
+        assert!(!zip_data.is_empty());
+        assert_eq!(&zip_data[0..4], b"PK\x03\x04");
+    }
+
+    #[test]
+    fn test_packager_with_footer_rels() {
+        let document = DocumentXml::new();
+        let styles = StylesDocument::new(Language::English);
+        let content_types = ContentTypes::new();
+        let rels = Relationships::root_rels();
+        let doc_rels = Relationships::document_rels();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut packager = Packager::new(buffer);
+
+        // Package components
+        packager
+            .package(
+                &document,
+                &styles,
+                &content_types,
+                &rels,
+                &doc_rels,
+                Language::English,
+            )
+            .unwrap();
+
+        // Add footer rels
+        let rels_data = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.png"/>
+</Relationships>"#;
+        packager.add_footer_rels(1, rels_data).unwrap();
 
         // Finish
         let buffer = packager.finish().unwrap();

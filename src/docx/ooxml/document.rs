@@ -1279,19 +1279,22 @@ impl DocumentXml {
         p: &Paragraph,
     ) -> Result<()> {
         // Case 1: Section break with header/footer suppression
+        // For cover/TOC sections, we want NO headers/footers at all.
+        // If empty header/footer IDs are set, use them to explicitly prevent inheritance.
+        // Otherwise, passing None means no w:headerReference/w:footerReference elements,
+        // which tells Word this section has no headers/footers.
         if p.section_break.is_some() && p.suppress_header_footer {
             if self.empty_header_id.is_some() || self.empty_footer_id.is_some() {
-                // Create temporary refs pointing to empty files
-                let mut empty_refs = HeaderFooterRefs::default();
-                if let Some(id) = &self.empty_header_id {
-                    empty_refs.default_header_id = Some(id.clone());
-                }
-                if let Some(id) = &self.empty_footer_id {
-                    empty_refs.default_footer_id = Some(id.clone());
-                }
+                // Create refs with empty header/footer IDs to explicitly prevent inheritance
+                let empty_refs = HeaderFooterRefs {
+                    default_header_id: self.empty_header_id.clone(),
+                    default_footer_id: self.empty_footer_id.clone(),
+                    first_header_id: None,
+                    first_footer_id: None,
+                    different_first_page: false,
+                };
                 return p.write_xml(writer, Some(&empty_refs));
             } else {
-                // No empty files available, just suppress by passing None
                 return p.write_xml(writer, None);
             }
         }

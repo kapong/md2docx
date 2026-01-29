@@ -22,7 +22,7 @@ pub mod template;
 
 pub use docx::ooxml::{FooterConfig, HeaderConfig, HeaderFooterField};
 pub use docx::toc::TocConfig;
-pub use docx::DocumentConfig;
+pub use docx::{DocumentConfig, DocumentMeta};
 pub use parser::{IncludeConfig, IncludeResolver, ParsedDocument};
 pub use template::{PlaceholderContext, TemplateDir, TemplateSet};
 
@@ -457,7 +457,7 @@ pub fn markdown_to_docx_with_templates(
 
     // Process headers
     let mut header_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (header_num, _) in &build_result.headers {
+    for (header_num, _, _) in &build_result.headers {
         content_types.add_header(*header_num);
         let rel_id = rel_manager.next_id();
         doc_rels.add_header_with_id(&rel_id, *header_num);
@@ -466,7 +466,7 @@ pub fn markdown_to_docx_with_templates(
 
     // Process footers
     let mut footer_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (footer_num, _) in &build_result.footers {
+    for (footer_num, _, _) in &build_result.footers {
         content_types.add_footer(*footer_num);
         let rel_id = rel_manager.next_id();
         doc_rels.add_footer_with_id(&rel_id, *footer_num);
@@ -479,6 +479,8 @@ pub fn markdown_to_docx_with_templates(
             build_result.document.header_footer_refs.default_header_id = Some(rel_id.clone());
         } else if *num == 2 {
             build_result.document.header_footer_refs.first_header_id = Some(rel_id.clone());
+        } else if *num == 3 {
+            // Header 3 is the truly empty header for cover/TOC suppression
             build_result.document.empty_header_id = Some(rel_id.clone());
         }
     }
@@ -488,6 +490,8 @@ pub fn markdown_to_docx_with_templates(
             build_result.document.header_footer_refs.default_footer_id = Some(rel_id.clone());
         } else if *num == 2 {
             build_result.document.header_footer_refs.first_footer_id = Some(rel_id.clone());
+        } else if *num == 3 {
+            // Footer 3 is the truly empty footer for cover/TOC suppression
             build_result.document.empty_footer_id = Some(rel_id.clone());
         }
     }
@@ -501,14 +505,65 @@ pub fn markdown_to_docx_with_templates(
         lang,
     )?;
 
+    // Track media files already added to avoid duplicates
+    let mut added_media_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     // Add headers
-    for (header_num, header_bytes) in &build_result.headers {
+    for (header_num, header_bytes, media) in &build_result.headers {
         packager.add_header(*header_num, header_bytes)?;
+
+        // Add media files for this header (skip duplicates)
+        for (_r_id, media_file) in media {
+            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
+            {
+                // Add the media file to the archive
+                packager.add_image(&media_file.filename, &media_file.data)?;
+                added_media_files.insert(media_file.filename.clone());
+
+                // Add to content types
+                let ext = std::path::Path::new(&media_file.filename)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("png");
+                content_types.add_image_extension(ext, &media_file.content_type);
+            }
+        }
+
+        // Generate and add rels file if there are media files
+        if !media.is_empty() {
+            let rels_xml =
+                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+            packager.add_header_rels(*header_num, &rels_xml)?;
+        }
     }
 
     // Add footers
-    for (footer_num, footer_bytes) in &build_result.footers {
+    for (footer_num, footer_bytes, media) in &build_result.footers {
         packager.add_footer(*footer_num, footer_bytes)?;
+
+        // Add media files for this footer (skip duplicates)
+        for (_r_id, media_file) in media {
+            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
+            {
+                // Add the media file to the archive
+                packager.add_image(&media_file.filename, &media_file.data)?;
+                added_media_files.insert(media_file.filename.clone());
+
+                // Add to content types
+                let ext = std::path::Path::new(&media_file.filename)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("png");
+                content_types.add_image_extension(ext, &media_file.content_type);
+            }
+        }
+
+        // Generate and add rels file if there are media files
+        if !media.is_empty() {
+            let rels_xml =
+                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+            packager.add_footer_rels(*footer_num, &rels_xml)?;
+        }
     }
 
     let cursor = packager.finish()?;
@@ -866,7 +921,7 @@ pub fn markdown_to_docx_with_includes(
 
     // Process headers and capture returned relationship IDs
     let mut header_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (header_num, _) in &build_result.headers {
+    for (header_num, _, _) in &build_result.headers {
         content_types.add_header(*header_num);
         let rel_id = doc_rels.add_header(*header_num);
         header_rel_ids.push((*header_num, rel_id));
@@ -874,20 +929,21 @@ pub fn markdown_to_docx_with_includes(
 
     // Process footers and capture returned relationship IDs
     let mut footer_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (footer_num, _) in &build_result.footers {
+    for (footer_num, _, _) in &build_result.footers {
         content_types.add_footer(*footer_num);
         let rel_id = doc_rels.add_footer(*footer_num);
         footer_rel_ids.push((*footer_num, rel_id));
     }
 
     // Update header/footer refs with actual relationship IDs from doc_rels
-    // Header 1 is default, header 2 is first page
+    // Header 1 is default, header 2 is first page, header 3 is empty for suppression
     for (num, rel_id) in &header_rel_ids {
         if *num == 1 {
             build_result.document.header_footer_refs.default_header_id = Some(rel_id.clone());
         } else if *num == 2 {
             build_result.document.header_footer_refs.first_header_id = Some(rel_id.clone());
-            // Also store as empty header ID for suppression
+        } else if *num == 3 {
+            // Header 3 is the truly empty header for cover/TOC suppression
             build_result.document.empty_header_id = Some(rel_id.clone());
         }
     }
@@ -897,7 +953,8 @@ pub fn markdown_to_docx_with_includes(
             build_result.document.header_footer_refs.default_footer_id = Some(rel_id.clone());
         } else if *num == 2 {
             build_result.document.header_footer_refs.first_footer_id = Some(rel_id.clone());
-            // Also store as empty footer ID for suppression
+        } else if *num == 3 {
+            // Footer 3 is the truly empty footer for cover/TOC suppression
             build_result.document.empty_footer_id = Some(rel_id.clone());
         }
     }
@@ -911,14 +968,65 @@ pub fn markdown_to_docx_with_includes(
         lang,
     )?;
 
+    // Track media files already added to avoid duplicates
+    let mut added_media_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     // Add headers to the archive
-    for (header_num, header_bytes) in &build_result.headers {
+    for (header_num, header_bytes, media) in &build_result.headers {
         packager.add_header(*header_num, header_bytes)?;
+
+        // Add media files for this header (skip duplicates)
+        for (_r_id, media_file) in media {
+            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
+            {
+                // Add the media file to the archive
+                packager.add_image(&media_file.filename, &media_file.data)?;
+                added_media_files.insert(media_file.filename.clone());
+
+                // Add to content types
+                let ext = std::path::Path::new(&media_file.filename)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("png");
+                content_types.add_image_extension(ext, &media_file.content_type);
+            }
+        }
+
+        // Generate and add rels file if there are media files
+        if !media.is_empty() {
+            let rels_xml =
+                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+            packager.add_header_rels(*header_num, &rels_xml)?;
+        }
     }
 
     // Add footers to the archive
-    for (footer_num, footer_bytes) in &build_result.footers {
+    for (footer_num, footer_bytes, media) in &build_result.footers {
         packager.add_footer(*footer_num, footer_bytes)?;
+
+        // Add media files for this footer (skip duplicates)
+        for (_r_id, media_file) in media {
+            if !media_file.filename.is_empty() && !added_media_files.contains(&media_file.filename)
+            {
+                // Add the media file to the archive
+                packager.add_image(&media_file.filename, &media_file.data)?;
+                added_media_files.insert(media_file.filename.clone());
+
+                // Add to content types
+                let ext = std::path::Path::new(&media_file.filename)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("png");
+                content_types.add_image_extension(ext, &media_file.content_type);
+            }
+        }
+
+        // Generate and add rels file if there are media files
+        if !media.is_empty() {
+            let rels_xml =
+                crate::template::render::header_footer::generate_header_footer_rels_xml(media);
+            packager.add_footer_rels(*footer_num, &rels_xml)?;
+        }
     }
 
     let cursor = packager.finish()?;
@@ -1258,11 +1366,11 @@ mod tests {
             .unwrap();
 
         // Add headers and footers
-        for (header_num, header_bytes) in &build_result.headers {
+        for (header_num, header_bytes, _) in &build_result.headers {
             packager.add_header(*header_num, header_bytes).unwrap();
         }
 
-        for (footer_num, footer_bytes) in &build_result.footers {
+        for (footer_num, footer_bytes, _) in &build_result.footers {
             packager.add_footer(*footer_num, footer_bytes).unwrap();
         }
 

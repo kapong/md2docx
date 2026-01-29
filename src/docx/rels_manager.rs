@@ -113,16 +113,22 @@ mod tests {
     #[test]
     fn test_reserve() {
         let mut mgr = RelIdManager::new();
+
+        // Test 1: Reserve an ID higher than current next_id bumps the counter
         mgr.reserve("rId10");
-
-        // Should skip rId10
-        // rId6, 7, 8, 9
-        for _ in 0..4 {
-            mgr.next_id();
-        }
-
-        let id = mgr.next_id(); // Should be rId11 (since rId10 is reserved)
+        // Reserving rId10 bumps next_id to 11, so next call returns rId11
+        let id = mgr.next_id();
         assert_eq!(id, "rId11");
+
+        // Test 2: Reserved IDs in sequence are skipped
+        let mut mgr2 = RelIdManager::new();
+        // After construction, next_id is 6 (rId1-5 reserved)
+        let id1 = mgr2.next_id(); // rId6
+        assert_eq!(id1, "rId6");
+
+        mgr2.reserve("rId7"); // Reserve next expected ID
+        let id2 = mgr2.next_id(); // Should skip rId7, return rId8
+        assert_eq!(id2, "rId8");
     }
 
     #[test]

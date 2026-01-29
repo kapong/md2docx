@@ -8,8 +8,8 @@ pub mod toc;
 pub mod xref;
 
 pub use builder::{
-    build_document, BuildResult, DocumentConfig, HyperlinkContext, HyperlinkInfo, ImageContext,
-    ImageInfo,
+    build_document, BuildResult, DocumentConfig, DocumentMeta, HyperlinkContext, HyperlinkInfo,
+    ImageContext, ImageInfo,
 };
 pub use ooxml::*;
 pub use packager::*;

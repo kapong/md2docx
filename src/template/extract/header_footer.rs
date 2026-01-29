@@ -1,138 +1,85 @@
 //! Header/Footer template extraction from DOCX files
-//!
-//! Extracts header and footer content with placeholders from a DOCX file.
 
 use crate::error::{Error, Result};
+use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 
 /// Represents an extracted header/footer template
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct HeaderFooterTemplate {
-    /// Header content
-    pub header: HeaderContent,
-    /// Footer content
-    pub footer: FooterContent,
-    /// Whether first page is different (no header/footer on cover)
+    /// Default header content (for pages after first)
+    pub default_header: Option<HeaderFooterContent>,
+    /// Default footer content (for pages after first)
+    pub default_footer: Option<HeaderFooterContent>,
+    /// First page header content (when different_first_page is true)
+    pub first_page_header: Option<HeaderFooterContent>,
+    /// First page footer content (when different_first_page is true)
+    pub first_page_footer: Option<HeaderFooterContent>,
+    /// Whether first page is different (w:titlePg flag was set in document)
     pub different_first_page: bool,
+    /// Media files referenced by headers/footers (images, etc.)
+    pub media: Vec<MediaFile>,
 }
 
-/// Header content with left, center, right sections
+/// Content of a single header or footer
 #[derive(Debug, Clone)]
-pub struct HeaderContent {
-    /// Left-aligned content (may contain placeholders)
-    pub left: String,
-    /// Center-aligned content (may contain placeholders)
-    pub center: String,
-    /// Right-aligned content (may contain placeholders)
-    pub right: String,
-    /// Font family
-    pub font_family: String,
-    /// Font size in half-points
-    pub font_size: u32,
-    /// Font color (hex)
-    pub font_color: String,
+pub struct HeaderFooterContent {
+    /// Raw XML content (everything inside <w:hdr> or <w:ftr>, including the root element)
+    pub raw_xml: String,
+    /// Detected placeholders in the content (e.g., ["title", "page", "chapter"])
+    pub placeholders: Vec<String>,
+    /// Relationship ID mappings from this header/footer's rels file (rId -> target path)
+    pub rel_id_map: HashMap<String, String>,
 }
 
-/// Footer content with left, center, right sections
+/// Media file extracted from the template
 #[derive(Debug, Clone)]
-pub struct FooterContent {
-    /// Left-aligned content (may contain placeholders)
-    pub left: String,
-    /// Center-aligned content (may contain placeholders)
-    pub center: String,
-    /// Right-aligned content (may contain placeholders)
-    pub right: String,
-    /// Font family
-    pub font_family: String,
-    /// Font size in half-points
-    pub font_size: u32,
-    /// Font color (hex)
-    pub font_color: String,
-}
-
-impl Default for HeaderContent {
-    fn default() -> Self {
-        Self {
-            left: "{{title}}".to_string(),
-            center: "".to_string(),
-            right: "{{chapter}}".to_string(),
-            font_family: "Calibri".to_string(),
-            font_size: 20, // 10pt
-            font_color: "#4a5568".to_string(),
-        }
-    }
-}
-
-impl Default for FooterContent {
-    fn default() -> Self {
-        Self {
-            left: "".to_string(),
-            center: "{{page}}".to_string(),
-            right: "".to_string(),
-            font_family: "Calibri".to_string(),
-            font_size: 20, // 10pt
-            font_color: "#4a5568".to_string(),
-        }
-    }
-}
-
-impl Default for HeaderFooterTemplate {
-    fn default() -> Self {
-        Self {
-            header: HeaderContent::default(),
-            footer: FooterContent::default(),
-            different_first_page: true,
-        }
-    }
+pub struct MediaFile {
+    /// Filename (e.g., "image1.png")
+    pub filename: String,
+    /// File content bytes
+    pub data: Vec<u8>,
+    /// Content type (e.g., "image/png")
+    pub content_type: String,
 }
 
 impl HeaderFooterTemplate {
-    /// Create a new header/footer template with default content
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Check if header has any placeholders
-    pub fn header_has_placeholders(&self) -> bool {
-        self.header.left.contains("{{")
-            || self.header.center.contains("{{")
-            || self.header.right.contains("{{")
+    /// Check if template has any content
+    pub fn is_empty(&self) -> bool {
+        self.default_header.is_none()
+            && self.default_footer.is_none()
+            && self.first_page_header.is_none()
+            && self.first_page_footer.is_none()
     }
 
-    /// Check if footer has any placeholders
-    pub fn footer_has_placeholders(&self) -> bool {
-        self.footer.left.contains("{{")
-            || self.footer.center.contains("{{")
-            || self.footer.right.contains("{{")
-    }
-
-    /// Get all unique placeholder keys from header and footer
+    /// Get all unique placeholders from all headers/footers
     pub fn all_placeholders(&self) -> Vec<String> {
-        use crate::template::placeholder::extract_placeholders;
-        use std::collections::HashSet;
+        let mut keys = std::collections::HashSet::new();
 
-        let mut keys = HashSet::new();
-
-        // Extract from header
-        for key in extract_placeholders(&self.header.left) {
-            keys.insert(key);
+        if let Some(ref h) = self.default_header {
+            for k in &h.placeholders {
+                keys.insert(k.clone());
+            }
         }
-        for key in extract_placeholders(&self.header.center) {
-            keys.insert(key);
+        if let Some(ref f) = self.default_footer {
+            for k in &f.placeholders {
+                keys.insert(k.clone());
+            }
         }
-        for key in extract_placeholders(&self.header.right) {
-            keys.insert(key);
+        if let Some(ref h) = self.first_page_header {
+            for k in &h.placeholders {
+                keys.insert(k.clone());
+            }
         }
-
-        // Extract from footer
-        for key in extract_placeholders(&self.footer.left) {
-            keys.insert(key);
-        }
-        for key in extract_placeholders(&self.footer.center) {
-            keys.insert(key);
-        }
-        for key in extract_placeholders(&self.footer.right) {
-            keys.insert(key);
+        if let Some(ref f) = self.first_page_footer {
+            for k in &f.placeholders {
+                keys.insert(k.clone());
+            }
         }
 
         keys.into_iter().collect()
@@ -140,29 +87,7 @@ impl HeaderFooterTemplate {
 }
 
 /// Extract header/footer template from a DOCX file
-///
-/// This function reads a DOCX file and extracts header and footer content
-/// with their formatting.
-///
-/// # Arguments
-/// * `path` - Path to the header-footer.docx file
-///
-/// # Returns
-/// The extracted `HeaderFooterTemplate`
-///
-/// # Example
-/// ```rust,no_run
-/// use md2docx::template::extract::extract_header_footer;
-/// use std::path::Path;
-///
-/// let hf = extract_header_footer(Path::new("my-template/header-footer.docx")).unwrap();
-/// println!("Header left: {}", hf.header.left);
-/// println!("Footer center: {}", hf.footer.center);
-/// ```
 pub fn extract(path: &Path) -> Result<HeaderFooterTemplate> {
-    // TODO: Implement actual DOCX parsing
-    // For now, return default template as a placeholder
-
     if !path.exists() {
         return Err(Error::Template(format!(
             "Header/footer template file not found: {}",
@@ -170,8 +95,325 @@ pub fn extract(path: &Path) -> Result<HeaderFooterTemplate> {
         )));
     }
 
-    // Placeholder implementation - will be replaced with actual extraction
-    Ok(HeaderFooterTemplate::default())
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+
+    // 1. Read document.xml.rels to find header/footer files
+    let doc_rels = read_archive_file(&mut archive, "word/_rels/document.xml.rels")?;
+
+    // 2. Parse relationships to find header/footer file mappings
+    let _header_files = find_header_footer_files(&doc_rels, "header");
+    let _footer_files = find_header_footer_files(&doc_rels, "footer");
+
+    // 3. Read document.xml to check for w:titlePg (different first page) and header/footer references
+    let document_xml = read_archive_file(&mut archive, "word/document.xml")?;
+    let different_first_page =
+        document_xml.contains("<w:titlePg") || document_xml.contains("<w:titlePg/>");
+
+    // 4. Determine which files are default vs first page
+    // Note: headerReference/footerReference elements are in document.xml, but we need
+    // doc_rels to map rId to actual file paths
+    let (default_header_file, first_header_file) =
+        categorize_header_footer_files(&document_xml, &doc_rels, "header");
+    let (default_footer_file, first_footer_file) =
+        categorize_header_footer_files(&document_xml, &doc_rels, "footer");
+
+    // 5. Extract each header/footer content
+    let default_header = extract_header_footer_content(&mut archive, &default_header_file, "word")?;
+    let first_page_header = if different_first_page {
+        extract_header_footer_content(&mut archive, &first_header_file, "word")?
+    } else {
+        None
+    };
+
+    let default_footer = extract_header_footer_content(&mut archive, &default_footer_file, "word")?;
+    let first_page_footer = if different_first_page {
+        extract_header_footer_content(&mut archive, &first_footer_file, "word")?
+    } else {
+        None
+    };
+
+    // 6. Collect all media files referenced by headers/footers
+    let mut media = Vec::new();
+    collect_media_files(&mut archive, &default_header, &mut media)?;
+    collect_media_files(&mut archive, &first_page_header, &mut media)?;
+    collect_media_files(&mut archive, &default_footer, &mut media)?;
+    collect_media_files(&mut archive, &first_page_footer, &mut media)?;
+
+    Ok(HeaderFooterTemplate {
+        default_header,
+        default_footer,
+        first_page_header,
+        first_page_footer,
+        different_first_page,
+        media,
+    })
+}
+
+/// Read a file from the ZIP archive as a string
+fn read_archive_file<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    path: &str,
+) -> Result<String> {
+    let mut file = archive
+        .by_name(path)
+        .map_err(|e| Error::Zip(format!("Failed to read {}: {}", path, e)))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .map_err(|e| Error::Io(e))?;
+    Ok(content)
+}
+
+/// Find all header or footer files referenced in relationships XML
+fn find_header_footer_files(rels_xml: &str, hf_type: &str) -> Vec<String> {
+    let mut files = Vec::new();
+
+    // Look for Relationship elements with Type containing "header" or "footer"
+    let relationship_regex = regex::Regex::new(
+        r#"<Relationship[^>]*Type="[^"]*/(header|footer)"[^>]*Target="([^"]*)"[^>]*/>"#,
+    )
+    .unwrap();
+
+    for cap in relationship_regex.captures_iter(rels_xml) {
+        let type_match = cap.get(1).unwrap().as_str();
+        let target = cap.get(2).unwrap().as_str();
+
+        if type_match == hf_type {
+            // Target might be like "header1.xml" or "header2.xml"
+            files.push(target.to_string());
+        }
+    }
+
+    files
+}
+
+/// Categorize header/footer files into default and first page
+///
+/// Returns (default_file, first_page_file)
+fn categorize_header_footer_files(
+    document_xml: &str,
+    rels_xml: &str,
+    hf_type: &str,
+) -> (Option<String>, Option<String>) {
+    let mut default_file = None;
+    let mut first_page_file = None;
+
+    // Look for headerReference or footerReference elements in document.xml
+    // These have w:type="default" or w:type="first"
+    // Pattern: <w:headerReference w:type="default" r:id="rId8"/>
+    let reference_regex = regex::Regex::new(
+        r#"<w:(header|footer)Reference[^>]*w:type="(default|first|even)"[^>]*r:id="([^"]*)"[^>]*/>"#,
+    )
+    .unwrap();
+
+    for cap in reference_regex.captures_iter(document_xml) {
+        let ref_type = cap.get(1).unwrap().as_str();
+        let ref_subtype = cap.get(2).unwrap().as_str();
+        let r_id = cap.get(3).unwrap().as_str();
+
+        if ref_type != hf_type {
+            continue;
+        }
+
+        // Find the target for this rId in the rels file
+        if let Some(target) = find_target_by_rid(rels_xml, r_id) {
+            if ref_subtype == "default" {
+                default_file = Some(target);
+            } else if ref_subtype == "first" {
+                first_page_file = Some(target);
+            }
+            // "even" type is for even pages - we skip it for now
+        }
+    }
+
+    // If we couldn't find explicit type attributes, use the first file as default
+    if default_file.is_none() {
+        let files = find_header_footer_files(rels_xml, hf_type);
+        if !files.is_empty() {
+            default_file = Some(files[0].clone());
+            if files.len() > 1 {
+                first_page_file = Some(files[1].clone());
+            }
+        }
+    }
+
+    (default_file, first_page_file)
+}
+
+/// Find the Target for a given rId in relationships XML
+fn find_target_by_rid(rels_xml: &str, r_id: &str) -> Option<String> {
+    let regex = regex::Regex::new(&format!(
+        r#"<Relationship[^>]*Id="{}"[^>]*Target="([^"]*)"[^>]*/>"#,
+        regex::escape(r_id)
+    ))
+    .unwrap();
+
+    regex
+        .captures(rels_xml)
+        .map(|cap| cap.get(1).unwrap().as_str().to_string())
+}
+
+/// Extract header/footer content from a file in the archive
+fn extract_header_footer_content<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    filename: &Option<String>,
+    base_path: &str,
+) -> Result<Option<HeaderFooterContent>> {
+    let filename = match filename {
+        Some(f) => f,
+        None => return Ok(None),
+    };
+
+    // Construct full path (e.g., "word/header1.xml")
+    let full_path = if filename.starts_with(base_path) {
+        filename.clone()
+    } else {
+        format!("{}/{}", base_path, filename)
+    };
+
+    // Read the header/footer XML
+    let xml = read_archive_file(archive, &full_path)?;
+
+    // Extract placeholders from the XML
+    let placeholders = extract_placeholders_from_xml(&xml);
+
+    // Read the rels file for this header/footer if it exists
+    let rel_id_map = extract_rel_id_map(archive, &full_path)?;
+
+    Ok(Some(HeaderFooterContent {
+        raw_xml: xml,
+        placeholders,
+        rel_id_map,
+    }))
+}
+
+/// Extract placeholders from XML content
+///
+/// Looks for {{placeholder}} patterns within <w:t> elements
+pub fn extract_placeholders_from_xml(xml: &str) -> Vec<String> {
+    let mut placeholders = Vec::new();
+    let placeholder_regex = regex::Regex::new(r"\{\{(\w+)\}\}").unwrap();
+
+    for cap in placeholder_regex.captures_iter(xml) {
+        let key = cap.get(1).unwrap().as_str().to_string();
+        if !placeholders.contains(&key) {
+            placeholders.push(key);
+        }
+    }
+
+    placeholders
+}
+
+/// Extract relationship ID mappings from a header/footer's rels file
+fn extract_rel_id_map<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    header_footer_path: &str,
+) -> Result<HashMap<String, String>> {
+    let mut rel_id_map = HashMap::new();
+
+    // Construct rels file path (e.g., "word/_rels/header1.xml.rels")
+    let filename = header_footer_path
+        .strip_prefix("word/")
+        .unwrap_or(header_footer_path);
+    let rels_path = format!("word/_rels/{}.rels", filename);
+
+    // Try to read the rels file
+    let rels_xml = match read_archive_file(archive, &rels_path) {
+        Ok(xml) => xml,
+        Err(_) => return Ok(rel_id_map), // No rels file is OK
+    };
+
+    // Parse relationships
+    let relationship_regex =
+        regex::Regex::new(r#"<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*/>"#).unwrap();
+
+    for cap in relationship_regex.captures_iter(&rels_xml) {
+        let r_id = cap.get(1).unwrap().as_str().to_string();
+        let target = cap.get(2).unwrap().as_str().to_string();
+        rel_id_map.insert(r_id, target);
+    }
+
+    Ok(rel_id_map)
+}
+
+/// Collect media files referenced by header/footer content
+fn collect_media_files<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    content: &Option<HeaderFooterContent>,
+    media: &mut Vec<MediaFile>,
+) -> Result<()> {
+    let content = match content {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+
+    // Find all r:embed references in the XML
+    let embed_regex = regex::Regex::new(r#"r:embed="([^"]*)""#).unwrap();
+
+    for cap in embed_regex.captures_iter(&content.raw_xml) {
+        let r_id = cap.get(1).unwrap().as_str();
+
+        // Look up the target in the rel_id_map
+        if let Some(target) = content.rel_id_map.get(r_id) {
+            // Construct full path to media file (e.g., "word/media/image1.png")
+            let media_path = if target.starts_with("media/") {
+                format!("word/{}", target)
+            } else {
+                target.clone()
+            };
+
+            // Extract the filename
+            let filename = media_path
+                .rsplit('/')
+                .next()
+                .unwrap_or("unknown")
+                .to_string();
+
+            // Determine content type from extension
+            let content_type = guess_content_type(&filename);
+
+            // Read the media file
+            let data = match read_archive_bytes(archive, &media_path) {
+                Ok(d) => d,
+                Err(_) => continue, // Skip if file not found
+            };
+
+            media.push(MediaFile {
+                filename,
+                data,
+                content_type,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Read a file from the ZIP archive as bytes
+fn read_archive_bytes<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    path: &str,
+) -> Result<Vec<u8>> {
+    let mut file = archive
+        .by_name(path)
+        .map_err(|e| Error::Zip(format!("Failed to read {}: {}", path, e)))?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data).map_err(|e| Error::Io(e))?;
+    Ok(data)
+}
+
+/// Guess content type from filename extension
+pub fn guess_content_type(filename: &str) -> String {
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+
+    match ext.as_str() {
+        "png" => "image/png".to_string(),
+        "jpg" | "jpeg" => "image/jpeg".to_string(),
+        "gif" => "image/gif".to_string(),
+        "bmp" => "image/bmp".to_string(),
+        "svg" => "image/svg+xml".to_string(),
+        _ => "application/octet-stream".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -181,57 +423,53 @@ mod tests {
     #[test]
     fn test_header_footer_template_default() {
         let template = HeaderFooterTemplate::default();
-
-        assert_eq!(template.header.left, "{{title}}");
-        assert_eq!(template.header.right, "{{chapter}}");
-        assert_eq!(template.footer.center, "{{page}}");
-        assert!(template.different_first_page);
+        assert!(template.is_empty());
+        assert!(template.all_placeholders().is_empty());
     }
 
     #[test]
-    fn test_header_has_placeholders() {
-        let template = HeaderFooterTemplate::default();
-        assert!(template.header_has_placeholders());
-
-        let template_no_placeholders = HeaderFooterTemplate {
-            header: HeaderContent {
-                left: "Static Text".to_string(),
-                right: "More Static Text".to_string(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert!(!template_no_placeholders.header_has_placeholders());
+    fn test_extract_placeholders_from_xml() {
+        let xml = r#"<w:p><w:r><w:t>{{title}} by {{author}}</w:t></w:r></w:p>"#;
+        let placeholders = extract_placeholders_from_xml(xml);
+        assert_eq!(placeholders, vec!["title", "author"]);
     }
 
     #[test]
-    fn test_footer_has_placeholders() {
-        let template = HeaderFooterTemplate::default();
-        assert!(template.footer_has_placeholders());
-
-        let template_no_placeholders = HeaderFooterTemplate {
-            footer: FooterContent {
-                center: "Static".to_string(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert!(!template_no_placeholders.footer_has_placeholders());
+    fn test_extract_placeholders_empty() {
+        let xml = r#"<w:p><w:r><w:t>No placeholders here</w:t></w:r></w:p>"#;
+        let placeholders = extract_placeholders_from_xml(xml);
+        assert!(placeholders.is_empty());
     }
 
     #[test]
-    fn test_all_placeholders() {
-        let template = HeaderFooterTemplate::default();
-        let placeholders = template.all_placeholders();
-
-        assert!(placeholders.contains(&"title".to_string()));
-        assert!(placeholders.contains(&"chapter".to_string()));
-        assert!(placeholders.contains(&"page".to_string()));
+    fn test_guess_content_type() {
+        assert_eq!(guess_content_type("image.png"), "image/png");
+        assert_eq!(guess_content_type("photo.jpg"), "image/jpeg");
+        assert_eq!(guess_content_type("animation.gif"), "image/gif");
+        assert_eq!(guess_content_type("drawing.svg"), "image/svg+xml");
+        assert_eq!(
+            guess_content_type("unknown.xyz"),
+            "application/octet-stream"
+        );
     }
 
     #[test]
-    fn test_extract_file_not_found() {
-        let result = extract(Path::new("/nonexistent/header-footer.docx"));
-        assert!(result.is_err());
+    fn test_find_target_by_rid() {
+        let rels_xml = r#"
+            <Relationships>
+                <Relationship Id="rId1" Type="..." Target="header1.xml"/>
+                <Relationship Id="rId2" Type="..." Target="header2.xml"/>
+            </Relationships>
+        "#;
+
+        assert_eq!(
+            find_target_by_rid(rels_xml, "rId1"),
+            Some("header1.xml".to_string())
+        );
+        assert_eq!(
+            find_target_by_rid(rels_xml, "rId2"),
+            Some("header2.xml".to_string())
+        );
+        assert_eq!(find_target_by_rid(rels_xml, "rId99"), None);
     }
 }

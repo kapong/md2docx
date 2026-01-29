@@ -72,7 +72,7 @@ pub fn needs_placeholder_data(template: &CoverTemplate) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::template::extract::cover::{CoverElement, PageMargins};
+    use crate::template::extract::cover::CoverElement;
 
     #[test]
     fn test_needs_placeholder_data() {

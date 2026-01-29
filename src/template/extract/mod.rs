@@ -9,7 +9,7 @@ pub mod image;
 pub mod table;
 
 pub use cover::{CoverElement, CoverTemplate, ShapeType};
-pub use header_footer::{FooterContent, HeaderContent, HeaderFooterTemplate};
+pub use header_footer::{HeaderFooterContent, HeaderFooterTemplate, MediaFile};
 pub use image::{ImageCaptionStyle, ImageTemplate};
 pub use table::{BorderStyles, CellStyle, RowStyle, TableCaptionStyle, TableTemplate};
 

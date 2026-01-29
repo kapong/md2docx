@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:font>
+    <w:name w:val="Calibri"/>
+    <w:panose1 w:val="020F0502020204030204"/>
+    <w:charset w:val="00"/>
+    <w:family w:val="swiss"/>
+    <w:pitch w:val="variable"/>
+  </w:font>
+  <w:font>
+    <w:name w:val="Calibri Light"/>
+    <w:panose1 w:val="020F0302020204030204"/>
+    <w:charset w:val="00"/>
+    <w:family w:val="swiss"/>
+    <w:pitch w:val="variable"/>
+  </w:font>
+  <w:font>
+    <w:name w:val="Consolas"/>
+    <w:panose1 w:val="020B0609020204030204"/>
+    <w:charset w:val="00"/>
+    <w:family w:val="modern"/>
+    <w:pitch w:val="fixed"/>
+  </w:font>
+  <w:font>
+    <w:name w:val="TH Sarabun New"/>
+    <w:charset w:val="00"/>
+    <w:family w:val="auto"/>
+    <w:pitch w:val="variable"/>
+  </w:font>
+</w:fonts>

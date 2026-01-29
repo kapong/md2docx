@@ -123,17 +123,17 @@ impl HeaderXml {
         // Paragraph properties with tab stops
         writer.write_event(Event::Start(BytesStart::new("w:pPr")))?;
 
-        // Tab stops: center at 4680 twips, right at 9360 twips (for letter size)
+        // Tab stops: center at 4513 twips, right at 9026 twips (for A4 size)
         writer.write_event(Event::Start(BytesStart::new("w:tabs")))?;
 
         let mut center_tab = BytesStart::new("w:tab");
         center_tab.push_attribute(("w:val", "center"));
-        center_tab.push_attribute(("w:pos", "4680"));
+        center_tab.push_attribute(("w:pos", "4513"));
         writer.write_event(Event::Empty(center_tab))?;
 
         let mut right_tab = BytesStart::new("w:tab");
         right_tab.push_attribute(("w:val", "right"));
-        right_tab.push_attribute(("w:pos", "9360"));
+        right_tab.push_attribute(("w:pos", "9026"));
         writer.write_event(Event::Empty(right_tab))?;
 
         writer.write_event(Event::End(BytesEnd::new("w:tabs")))?;

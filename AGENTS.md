@@ -245,18 +245,31 @@ fn is_thai(c: char) -> bool {
 
 ### Mermaid Integration
 
+**Current Implementation**: Pure Rust via `mermaid-rs-renderer` crate
+
 ```rust
 // Extract mermaid blocks during parsing
-// Hash content for cache key
-// Render to PNG via:
-//   - CLI: chromiumoxide (headless Chrome) or external mmdc
-//   - WASM: call mermaid.js via JS interop
+// Hash content for cache key  
+// Render via mermaid-rs-renderer (pure Rust, no browser needed)
+// SVG output with text-to-path conversion (no font embedding issues)
+// Convert to PNG using image crate
+
+// Rendering flow:
+// Mermaid code → mermaid-rs-renderer → SVG → PNG bytes → embed in DOCX
 
 // Cache structure:
 // .md2docx-cache/
 //   mermaid/
 //     {sha256-hash}.png
+
+// Known limitations:
+// - Thai text in diagrams returns error (upstream mermaid-rs bug)
+// - Some complex diagram types may not render perfectly
 ```
+
+**NOT IMPLEMENTED**: 
+- Mermaid-CLI (mmdc) fallback - feature flag exists but not integrated
+- WASM mermaid.js bridge - stub only
 
 ### DO NOT
 
@@ -477,10 +490,10 @@ flowchart LR
     B --> C[DOCX]
 ```
 ```
-- **CLI**: Uses headless browser or mermaid-cli (mmdc)
-- **WASM**: Uses mermaid.js in browser, returns base64 PNG
+- **Rendering**: Pure Rust via `mermaid-rs-renderer` (no external dependencies)
+- **Output**: SVG with text-to-path conversion, then PNG
 - **Caching**: Hash-based cache to avoid re-rendering unchanged diagrams
-- **Themes**: Configurable (default, forest, dark, neutral)
+- **Limitation**: Thai text in diagrams returns error (upstream mermaid-rs bug)
 - **Config**:
 ```toml
 [mermaid]
@@ -490,8 +503,6 @@ background = "white"   # or "transparent"
 width = 800            # max width in pixels
 scale = 2              # render scale for quality
 cache = true           # cache rendered diagrams
-# CLI only:
-renderer = "auto"      # "auto", "mmdc", "playwright", "puppeteer"
 ```
 
 ### Language Support (Thai/English)
@@ -539,11 +550,70 @@ This software supports both English and ภาษาไทย in the same docume
 รองรับการแสดงผลภาษาไทยแบบเต็มรูปแบบ (Full Thai rendering support)
 ```
 
-### Cross-References
-- **Chapter links**: `[see Chapter 2](#ch02)` or `{ref:ch02}`
-- **Figure links**: `{ref:fig:my-image}` → "Figure 1.2"
-- **Table links**: `{ref:tbl:my-table}` → "Table 1.1"
-- **Anchor syntax**: `{#anchor-id}` after headings/figures
+### Cross-References ✅ IMPLEMENTED
+Reference figures, tables, chapters, and sections within paragraphs.
+
+#### Syntax
+```markdown
+# Introduction {#intro}
+
+See {ref:intro} for the introduction.
+See {ref:fig:architecture} for the system diagram.
+See {ref:tbl:users} for the user data table.
+See {ref:ch:getting-started} for the getting started guide.
+```
+
+#### Defining Anchors
+
+**Headings** - Add `{#id}` after heading text:
+```markdown
+# Getting Started {#getting-started}
+## Installation {#install}
+```
+
+**Images** - Add `{#fig:id}` in the attributes:
+```markdown
+![System Architecture](diagram.png){#fig:architecture width=80%}
+```
+
+**Tables** - Add anchor comment before table:
+```markdown
+<!-- {#tbl:users} -->
+| Name | Email |
+|------|-------|
+| John | john@example.com |
+```
+
+#### Reference Types
+
+| Prefix | Type | Display Example |
+|--------|------|-----------------|
+| `fig:` | Figure | "Figure 1.2" |
+| `tbl:` | Table | "Table 1.1" |
+| `ch:` | Chapter | "Chapter 1" |
+| `sec:` | Section | Section title text |
+| `ap:` | Appendix | "Appendix A" |
+| (none) | Auto-detect | Based on anchor registration |
+
+#### Numbering
+- Figures and tables are numbered per-chapter: `1.1`, `1.2`, `2.1`, etc.
+- Chapter counters reset figure/table numbering
+- If no chapters, uses simple numbering: `1`, `2`, `3`
+
+#### Implementation Details
+Cross-references use `CrossRefContext` (`src/docx/xref.rs`):
+```rust
+// Registers anchors during document build
+ctx.register_heading("intro", 1, "Introduction");
+ctx.register_figure("arch", "Architecture Diagram");
+ctx.register_table("users", "User Data");
+
+// Resolves references to display text
+ctx.get_display_text("arch", RefType::Figure); // → "Figure 1.1"
+```
+
+#### Unresolved References
+If a reference target doesn't exist, displays as `[target-id]` placeholder.
 
 ### Config File (`md2docx.toml`)
 ```toml
@@ -656,30 +726,6 @@ md2docx dump-template -o custom-reference.docx --lang en    # English defaults
 
 # Dump minimal template (fewer styles)
 md2docx dump-template -o minimal.docx --minimal
-
-#
-# Git Diff Commands
-#
-
-# Compare current with last commit
-md2docx diff -d ./docs/ --from HEAD~1 -o changes.docx
-
-# Compare two commits/tags
-md2docx diff -d ./docs/ --from v1.0 --to v2.0 -o diff.docx
-
-# Compare branches
-md2docx diff -d ./docs/ --from main --to feature/api -o review.docx
-
-# Diff modes
-md2docx diff ... --mode inline      # Colored strikethrough/underline
-md2docx diff ... --mode track       # Word Track Changes (default)
-md2docx diff ... --mode summary     # Only changed sections
-
-# Diff specific files
-md2docx diff -i ch01.md --from HEAD~3 -o ch01-changes.docx
-
-# Show diff stats only
-md2docx diff -d ./docs/ --from v1.0 --stats
 ```
 
 ## Architecture
@@ -692,7 +738,7 @@ No external dependencies. Runs in CLI, server, or browser.
 │                     md2docx                              │
 │            (CLI / Library / WASM)                        │
 ├─────────────────────────────────────────────────────────┤
-│  Config Parser  │  File Discovery  │  Git Diff Engine   │
+│  Config Parser  │  File Discovery  │  Cross-References  │
 ├─────────────────────────────────────────────────────────┤
 │                   Preprocessor                           │
 │  - Include resolution ({!include:}, {!code:})           │
@@ -708,10 +754,10 @@ No external dependencies. Runs in CLI, server, or browser.
 │  - Template style extraction                            │
 │  - ZIP packaging                                        │
 ├─────────────────────────────────────────────────────────┤
-│                   Diff Engine                            │
-│  - Git integration (CLI only)                           │
-│  - Track Changes in DOCX                                │
-│  - Visual diff markers                                  │
+│                   Mermaid Renderer                       │
+│  - Pure Rust (mermaid-rs-renderer)                      │
+│  - SVG to PNG conversion                                │
+│  - Hash-based caching                                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -728,81 +774,6 @@ No external dependencies. Runs in CLI, server, or browser.
 - Single binary distribution
 - Embeddable as library
 - Smaller attack surface
-
-## Git Diff Support
-
-### Use Cases
-1. **Changelog docs**: Show what changed between versions
-2. **Review docs**: Track Changes for reviewers
-3. **Audit trail**: Document evolution history
-
-### Diff Modes
-
-#### 1. Inline Diff (default)
-Shows additions/deletions inline with styling:
-```markdown
-This is ~~old text~~{++new text++}.
-```
-Renders with strikethrough (red) and underline (green) in DOCX.
-
-#### 2. Track Changes
-Native Word Track Changes format:
-- Insertions shown with author/date
-- Deletions shown with strikethrough
-- Reviewers can Accept/Reject
-
-#### 3. Side-by-Side (future)
-Two-column layout comparing versions.
-
-### CLI Usage
-```bash
-# Compare current with git commit
-md2docx diff -d ./docs/ --from HEAD~1 -o changes.docx
-
-# Compare two commits
-md2docx diff -d ./docs/ --from v1.0 --to v2.0 -o diff.docx
-
-# Compare two branches
-md2docx diff -d ./docs/ --from main --to feature/new-api -o review.docx
-
-# Output modes
-md2docx diff ... --mode inline      # Colored inline diff
-md2docx diff ... --mode track       # Word Track Changes
-md2docx diff ... --mode summary     # Summary + changed sections only
-```
-
-### Config
-```toml
-[diff]
-mode = "track"  # "inline", "track", "summary"
-show_author = true
-show_date = true
-insertion_color = "green"
-deletion_color = "red"
-# Ignore patterns
-ignore = ["bibliography.md", "*.generated.md"]
-```
-
-### Diff Syntax in Markdown
-Manual diff markers (for non-git use):
-```markdown
-{--deleted text--}
-{++inserted text++}
-{~~old~>new~~}
-{>>comment<<}
-{==highlight==}
-```
-
-### WASM Diff Mode
-For browser use without git:
-```javascript
-import { diff_documents } from 'md2docx';
-
-const oldMd = "# V1\nOld content";
-const newMd = "# V1\nNew content here";
-
-const docxBytes = diff_documents(oldMd, newMd, { mode: 'inline' });
-```
 
 ## Implementation Plan
 
@@ -830,33 +801,47 @@ const docxBytes = diff_documents(oldMd, newMd, { mode: 'inline' });
 ### Phase 4: Advanced ⚠️ PARTIAL
 - [x] 16. Cross-references (`{ref:target}` syntax, RefType enum)
 - [x] 17. Include directives (`{!include:...}`, `{!code:...}`)
-- [ ] 18. Bibliography/citations
-- [ ] 19. Index generation
+- [ ] 18. Bibliography/citations - **NOT IMPLEMENTED** (parsed but skipped)
+- [ ] 19. Index generation - **NOT IMPLEMENTED** (`{index:term}` parsed but skipped)
 
-### Phase 6: WASM & Polish ⚠️ PARTIAL
-- [ ] 26. WASM bindings
+### Phase 5: Mermaid Diagrams ✅ COMPLETE
+- [x] 20. Mermaid parsing (extract code blocks)
+- [x] 21. Pure Rust rendering via `mermaid-rs-renderer`
+- [x] 22. SVG to PNG conversion with text-to-path
+- [x] 23. Caching (hash-based)
+- [x] 24. Cover page templates (extract from cover.docx, placeholder replacement)
+- [ ] 25. Mermaid-CLI fallback - **NOT IMPLEMENTED** (feature flag exists but not integrated)
+- ⚠️ **Known Issue**: Thai text in Mermaid diagrams returns error (upstream bug)
+
+### Phase 6: WASM & Polish ❌ NOT IMPLEMENTED
+- [ ] 26. WASM bindings (`src/wasm/mod.rs` - stub only, "TODO: Implement")
 - [ ] 27. Browser API
-- [ ] 28. Watch mode (CLI)
-- [ ] 29. Draft mode
+- [ ] 28. Watch mode (CLI) - feature flag exists but not implemented
+- [ ] 29. Draft mode - not implemented
 - [x] 30. Template validation (`validate-template` command)
 
 ### Completed Fixes & Polish
-- [x] **Thai Language Support**: Proper font switching, line breaking fallback.
-- [x] **List Numbering**: Fixed issue where lists continued numbering across independent lists.
-- [x] **Smart List Continuation**: Added support for resuming lists interrupted by code blocks.
-- [x] **Layout**: Added automatic spacing (blank lines) before headings for better Word layout.
+- [x] **Thai Language Support**: Proper font switching, line breaking fallback
+- [x] **List Numbering**: Fixed issue where lists continued numbering across independent lists
+- [x] **Smart List Continuation**: Added support for resuming lists interrupted by code blocks
+- [x] **Layout**: Added automatic spacing (blank lines) before headings for better Word layout
+- [x] **Cover Page Templates**: Extract from cover.docx with placeholder replacement
 
 ### CLI Command Status
 | Command | Status | Notes |
 |---------|--------|-------|
 | `build` | ✅ Works | Single file (`-i`) and directory (`-d`) modes |
+| `build --template` | ⚠️ Limited | **Shows warning**: "Template support is not yet implemented" - styles from template not applied |
 | `dump-template` | ✅ Works | Generates template DOCX with all styles |
 | `validate-template` | ✅ Works | Checks for required/recommended styles |
+| `--watch` | ❌ Not implemented | Feature flag exists but not wired up |
+| `--draft` | ❌ Not implemented | Not wired up |
 
 ### Priority Next Steps
-1. **Bibliography/Citations** - Parse `[@cite]` syntax
-2. **Index Generation** - Auto-generate from `{index:term}` markers
-4. **WASM Bindings** - Browser API for web use
+1. **Template Style Application** - Apply styles from `--template` DOCX (currently shows warning)
+2. **Bibliography/Citations** - Parse `[@cite]` syntax, link to bibliography entries
+3. **Index Generation** - Auto-generate from `{index:term}` markers
+4. **WASM Bindings** - Implement `src/wasm/mod.rs` for browser use
 5. **Watch Mode** - Auto-rebuild on file changes
 
 
@@ -913,13 +898,6 @@ md2docx/
 │   │   ├── cache.rs        # Hash-based caching
 │   │   └── wasm.rs         # Browser mermaid.js bridge
 │   │
-│   ├── diff/
-│   │   ├── mod.rs
-│   │   ├── git.rs          # Git integration (feature-gated)
-│   │   ├── algorithm.rs    # Text diff
-│   │   ├── track_changes.rs # OOXML revisions
-│   │   └── inline.rs       # Inline diff styling
-│   │
 │   ├── discovery/
 │   │   ├── mod.rs
 │   │   └── files.rs        # Chapter/appendix ordering
@@ -948,8 +926,7 @@ md2docx/
     ├── with_template.rs
     ├── dump_template.rs
     ├── thai_document.rs
-    ├── mermaid_diagrams.rs
-    └── diff.rs
+    └── mermaid_diagrams.rs
 ```
 
 ## API Design
@@ -980,8 +957,7 @@ docx.write_to("output.docx")?;
 ### WASM Usage
 ```javascript
 import init, { 
-  markdown_to_docx, 
-  diff_documents,
+  markdown_to_docx,
   Document 
 } from 'md2docx';
 

@@ -48,9 +48,6 @@ docker run --rm \
 ```bash
 # Build from a directory of markdown files
 md2docx build -d docs/ -o output.docx
-
-# Watch for changes and auto-rebuild
-md2docx watch -d docs/ -o output.docx
 ```
 
 ---

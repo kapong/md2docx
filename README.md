@@ -48,9 +48,9 @@ docker run --rm \
 
 ### Basic Command Line Usage
 ```bash
-# Build from a directory of markdown files
-md2docx build -d docs/ -o output.docx
-```
+
+
+![example](docs/assets/example.png)
 
 ---
 

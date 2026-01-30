@@ -1,42 +1,62 @@
 # syntax=docker/dockerfile:1
-# Base stage - use generic linux (Debian) to avoid self-referential static linking issues
-FROM --platform=linux/amd64 rust:1-slim AS base
+
+# Build arguments for multi-arch
+ARG TARGETARCH
+
+# Base stage
+FROM rust:1-slim AS base
 RUN apt-get update && apt-get install -y musl-tools pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
-RUN rustup target add x86_64-unknown-linux-musl
 RUN cargo install cargo-chef --locked
 
 # Planner stage
-FROM --platform=linux/amd64 base AS planner
+FROM base AS planner
 WORKDIR /app
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Builder stage
-FROM --platform=linux/amd64 base AS builder
+FROM base AS builder
+ARG TARGETARCH
 WORKDIR /app
+
+# Add the appropriate musl target based on architecture
+RUN case "$TARGETARCH" in \
+    amd64) rustup target add x86_64-unknown-linux-musl ;; \
+    arm64) rustup target add aarch64-unknown-linux-musl ;; \
+    esac
+
 COPY --from=planner /app/recipe.json recipe.json
-# Build dependencies - separate target allows static linking without breaking proc-macros
+
+# Build dependencies
 ENV RUSTFLAGS="-C target-feature=+crt-static"
-RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
+RUN case "$TARGETARCH" in \
+    amd64) cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json ;; \
+    arm64) cargo chef cook --release --target aarch64-unknown-linux-musl --recipe-path recipe.json ;; \
+    esac
 
 # Build application
 COPY . .
-RUN cargo build --release --target x86_64-unknown-linux-musl --bin md2docx
+RUN case "$TARGETARCH" in \
+    amd64) cargo build --release --target x86_64-unknown-linux-musl --bin md2docx && \
+    mv target/x86_64-unknown-linux-musl/release/md2docx /md2docx ;; \
+    arm64) cargo build --release --target aarch64-unknown-linux-musl --bin md2docx && \
+    mv target/aarch64-unknown-linux-musl/release/md2docx /md2docx ;; \
+    esac
+
 RUN echo "md2docx:x:1000:1000::/workspace:/sbin/nologin" > /etc/passwd
 
 # Runtime stage (scratch)
-FROM --platform=linux/amd64 scratch
+FROM scratch
 WORKDIR /workspace
 
 # Copy certificates (required for HTTPS)
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 # Copy user information
 COPY --from=builder /etc/passwd /etc/passwd
-
 # Copy static binary
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/md2docx /md2docx
+COPY --from=builder /md2docx /md2docx
 
 # Run as non-root (user 1000)
 USER md2docx
 ENTRYPOINT ["/md2docx"]
-CMD ["--help"]
+CMD ["build", "-d", "docs/", "-o", "output/output.docx"]

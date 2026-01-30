@@ -1167,20 +1167,8 @@ fn block_to_elements(
                             });
                         }
 
-                        // Apply effect extent
-                        let extent = &tmpl.effect_extent;
-                        if extent.left > 0
-                            || extent.top > 0
-                            || extent.right > 0
-                            || extent.bottom > 0
-                        {
-                            img = img.with_effect_extent(crate::docx::ooxml::ImageEffectExtent {
-                                left: extent.left,
-                                top: extent.top,
-                                right: extent.right,
-                                bottom: extent.bottom,
-                            });
-                        }
+                        // Note: effect_extent (padding) is intentionally NOT applied to mermaid diagrams
+                        // as they typically don't need the extra spacing that regular images with shadows do
 
                         // Apply alignment
                         if !tmpl.alignment.is_empty() {

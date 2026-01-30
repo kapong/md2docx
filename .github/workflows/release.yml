@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-arm64:
+    name: Build macOS (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Build
+        run: cargo build --release --bin md2docx
+      
+      - name: Rename binary
+        run: mv target/release/md2docx md2docx-darwin-arm64
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: md2docx-darwin-arm64
+          path: md2docx-darwin-arm64
+
+  build-macos-x86_64:
+    name: Build macOS (Intel)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      
+      - name: Build
+        run: cargo build --release --target x86_64-apple-darwin --bin md2docx
+      
+      - name: Rename binary
+        run: mv target/x86_64-apple-darwin/release/md2docx md2docx-darwin-x86_64
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: md2docx-darwin-x86_64
+          path: md2docx-darwin-x86_64
+
+  build-linux-x86_64:
+    name: Build Linux (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      
+      - name: Install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-musl --bin md2docx
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+      
+      - name: Rename binary
+        run: mv target/x86_64-unknown-linux-musl/release/md2docx md2docx-linux-x86_64
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: md2docx-linux-x86_64
+          path: md2docx-linux-x86_64
+
+  release:
+    name: Create Release
+    needs: [build-macos-arm64, build-macos-x86_64, build-linux-x86_64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          mv artifacts/md2docx-darwin-arm64/md2docx-darwin-arm64 release/
+          mv artifacts/md2docx-darwin-x86_64/md2docx-darwin-x86_64 release/
+          mv artifacts/md2docx-linux-x86_64/md2docx-linux-x86_64 release/
+          chmod +x release/*
+          cd release && sha256sum * > checksums.txt
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/md2docx-darwin-arm64
+            release/md2docx-darwin-x86_64
+            release/md2docx-linux-x86_64
+            release/checksums.txt
+            install.sh
+          generate_release_notes: true

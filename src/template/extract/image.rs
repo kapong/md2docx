@@ -545,8 +545,7 @@ mod tests {
 
     #[test]
     fn test_debug_extract_real_template() {
-        let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/thai-manual/template/image.docx");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/template/image.docx");
         if !path.exists() {
             println!("Template file not found, skipping test");
             return;

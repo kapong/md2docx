@@ -7,7 +7,7 @@ use std::path::Path;
 
 #[test]
 fn test_extract_from_real_table_docx() {
-    let table_path = Path::new("examples/thai-manual/template/table.docx");
+    let table_path = Path::new("docs/template/table.docx");
 
     // Skip test if file doesn't exist (might not be in all environments)
     if !table_path.exists() {

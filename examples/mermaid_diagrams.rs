@@ -12,9 +12,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🧜‍♀️ Mermaid Diagram Rendering Example\n");
 
     // Read the markdown file
-    let markdown = fs::read_to_string("examples/mermaid-demo.md")?;
+    let markdown = fs::read_to_string("tests/fixtures/mermaid-demo.md")?;
 
-    println!("📄 Input file: examples/mermaid-demo.md");
+    println!("📄 Input file: tests/fixtures/mermaid-demo.md");
 
     println!("📊 Markdown size: {} bytes\n", markdown.len());
 

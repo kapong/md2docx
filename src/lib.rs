@@ -468,6 +468,7 @@ pub fn markdown_to_docx_with_templates(
             "gif" => "image/gif",
             "bmp" => "image/bmp",
             "svg" => "image/svg+xml",
+            "emf" => "image/x-emf",
             _ => "application/octet-stream",
         };
         content_types.add_image_extension(ext, content_type);

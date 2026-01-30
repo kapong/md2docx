@@ -16,9 +16,9 @@ Thumbs.db
 
 # Generated files
 *.docx
-!examples/**/template/*.docx
+!docs/template/*.docx
 output/
-examples/**/output/
+docs/output/
 
 # Debug/temp files
 temp/

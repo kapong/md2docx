@@ -447,6 +447,7 @@ pub fn guess_content_type(filename: &str) -> String {
         "gif" => "image/gif".to_string(),
         "bmp" => "image/bmp".to_string(),
         "svg" => "image/svg+xml".to_string(),
+        "emf" => "image/x-emf".to_string(),
         _ => "application/octet-stream".to_string(),
     }
 }
@@ -482,6 +483,7 @@ mod tests {
         assert_eq!(guess_content_type("photo.jpg"), "image/jpeg");
         assert_eq!(guess_content_type("animation.gif"), "image/gif");
         assert_eq!(guess_content_type("drawing.svg"), "image/svg+xml");
+        assert_eq!(guess_content_type("metafile.emf"), "image/x-emf");
         assert_eq!(
             guess_content_type("unknown.xyz"),
             "application/octet-stream"

@@ -16,4 +16,3 @@ services:
         source: ./output
         target: /workspace/output
     working_dir: /workspace
-    command: build -d /workspace/docs -o /workspace/output/output.docx

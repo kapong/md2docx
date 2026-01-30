@@ -181,7 +181,8 @@ impl ProjectBuilder {
         }
 
         if let Some(resolved) = self.config.output.resolve_filename(Some(&self.config)) {
-            self.base_dir.join(resolved)
+            // Output path is relative to current directory, not input directory
+            resolved
         } else {
             self.base_dir.join("output.docx")
         }

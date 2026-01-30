@@ -66,6 +66,10 @@ impl FootnotesXml {
             "xmlns:w",
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ));
+        root.push_attribute((
+            "xmlns:w14",
+            "http://schemas.microsoft.com/office/word/2010/wordml",
+        ));
         writer.write_event(Event::Start(root))?;
 
         // Add separator (id -1)
@@ -173,6 +177,7 @@ mod tests {
         assert!(xml_str.contains("<w:footnotes"));
         assert!(xml_str
             .contains("xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\""));
+        assert!(xml_str.contains("xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\""));
         assert!(xml_str.contains("<w:footnote w:type=\"separator\" w:id=\"-1\""));
         assert!(xml_str.contains("<w:footnote w:type=\"continuationSeparator\" w:id=\"0\""));
         assert!(xml_str.contains("<w:footnote w:id=\"1\""));

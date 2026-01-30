@@ -98,6 +98,24 @@ jobs:
           chmod +x release/*
           cd release && sha256sum * > checksums.txt
       
+      - name: Update Homebrew Formula
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          ARM64_SHA=$(sha256sum release/md2docx-darwin-arm64 | cut -d' ' -f1)
+          X64_SHA=$(sha256sum release/md2docx-darwin-x86_64 | cut -d' ' -f1)
+          LINUX_SHA=$(sha256sum release/md2docx-linux-x86_64 | cut -d' ' -f1)
+          
+          sed -i "s/version \".*\"/version \"$VERSION\"/" Formula/md2docx.rb
+          sed -i "s/sha256 \"REPLACE_WITH_ARM64_SHA256\"/sha256 \"$ARM64_SHA\"/" Formula/md2docx.rb
+          sed -i "s/sha256 \"REPLACE_WITH_X86_64_SHA256\"/sha256 \"$X64_SHA\"/" Formula/md2docx.rb
+          sed -i "s/sha256 \"REPLACE_WITH_LINUX_SHA256\"/sha256 \"$LINUX_SHA\"/" Formula/md2docx.rb
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add Formula/md2docx.rb
+          git commit -m "chore: update Homebrew formula to v$VERSION" || echo "No changes to commit"
+          git push origin main
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -108,3 +126,4 @@ jobs:
             release/checksums.txt
             install.sh
           generate_release_notes: true
+

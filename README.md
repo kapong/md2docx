@@ -22,7 +22,14 @@ Install the latest version directly to `/usr/local/bin`:
 curl -fsSL https://raw.githubusercontent.com/kapong/md2docx/main/install.sh | bash
 ```
 
-### Option 2: Docker (Recommended)
+### Option 2: Homebrew (macOS/Linux)
+Install via our self-hosted tap:
+```bash
+brew tap kapong/md2docx https://github.com/kapong/md2docx
+brew install md2docx
+```
+
+### Option 3: Docker (Recommended)
 Our Docker image is multi-platform (`amd64` and `arm64`), supporting both Intel and Apple Silicon Macs.
 
 **Pull the image:**

@@ -105,13 +105,20 @@ jobs:
           X64_SHA=$(sha256sum release/md2docx-darwin-x86_64 | cut -d' ' -f1)
           LINUX_SHA=$(sha256sum release/md2docx-linux-x86_64 | cut -d' ' -f1)
           
+          # Prepare git for committing
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Fetch and checkout main branch (since we are in detached HEAD)
+          git fetch origin main:main
+          git checkout main
+          
+          # Update the formula with new versions and SHAs
           sed -i "s/version \".*\"/version \"$VERSION\"/" Formula/md2docx.rb
           sed -i "s/sha256 \"REPLACE_WITH_ARM64_SHA256\"/sha256 \"$ARM64_SHA\"/" Formula/md2docx.rb
           sed -i "s/sha256 \"REPLACE_WITH_X86_64_SHA256\"/sha256 \"$X64_SHA\"/" Formula/md2docx.rb
           sed -i "s/sha256 \"REPLACE_WITH_LINUX_SHA256\"/sha256 \"$LINUX_SHA\"/" Formula/md2docx.rb
           
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
           git add Formula/md2docx.rb
           git commit -m "chore: update Homebrew formula to v$VERSION" || echo "No changes to commit"
           git push origin main

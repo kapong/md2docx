@@ -541,7 +541,7 @@ When reporting bugs, include: md2docx version (`md2docx --version`), operating s
 ### Example Bug Report / ตัวอย่างรายงานข้อบกพร่อง
 
 ```markdown
-**Version:** md2docx 0.1.0
+**Version:** md2docx 0.1.1
 **OS:** macOS 14.2
 
 **Command:**

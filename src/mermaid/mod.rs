@@ -10,8 +10,8 @@ use crate::error::Error;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-/// Padding factor for SVG canvas (1.15 = 15% extra space)
-const SVG_PADDING_FACTOR: f64 = 1.15;
+/// Padding factor for SVG canvas (1.0 = no extra padding)
+const SVG_PADDING_FACTOR: f64 = 1.0;
 
 use std::panic;
 

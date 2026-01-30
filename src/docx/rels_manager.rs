@@ -11,7 +11,10 @@ pub(crate) struct RelIdManager {
     // Mapping from (scope, original_id) -> new_id
     // Scope allows differentiating between cover.docx rIds and other sources
     mappings: HashMap<(String, String), String>,
+    /// Unique ID counter for images/drawings (wp:docPr id)
+    image_id_counter: u32,
 }
+
 
 impl RelIdManager {
     /// Create a new RelIdManager with standard IDs reserved
@@ -20,6 +23,7 @@ impl RelIdManager {
             next_id: 1,
             reserved_ids: HashSet::new(),
             mappings: HashMap::new(),
+            image_id_counter: 10000,
         };
 
         // Reserve standard IDs used in Relationships::document_rels()
@@ -77,6 +81,19 @@ impl RelIdManager {
         let new_id = self.next_id();
         self.mappings.insert(key, new_id.clone());
         new_id
+    }
+
+    /// Get the next unique image/drawing ID
+    pub fn next_image_id(&mut self) -> u32 {
+        let id = self.image_id_counter;
+        self.image_id_counter += 1;
+        id
+    }
+
+    /// Set an offset for image IDs to avoid collisions
+    #[allow(dead_code)]
+    pub fn set_image_id_offset(&mut self, offset: u32) {
+        self.image_id_counter = 10000 + offset;
     }
 
     /// Reset the manager (clearing mappings but keeping reserved IDs)

@@ -6,6 +6,18 @@ This appendix documents the version history and changes made to md2docx.
 
 ---
 
+## Version 0.1.1 (2026-01-30) {#ap02-v011}
+
+**Bug Fix Release / เวอร์ชันแก้ไขข้อบกพร่อง**
+
+### Bug Fixes / การแก้ไขข้อบกพร่อง
+
+- Fixed "Duplicate filename" ZIP error when building documents with multiple images
+- Removed 15% padding from Mermaid diagram SVG canvas for cleaner rendering
+- Removed border and shadow effects from Mermaid diagrams
+
+---
+
 ## Version 0.1.0 (2026-01-30) {#ap02-v010}
 
 **Initial Release / เวอร์ชันแรก**

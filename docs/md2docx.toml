@@ -4,7 +4,7 @@ subtitle = "Markdown to DOCX Converter / โปแกรมแปลง Markdown
 author = "P. Phienphanich"
 date = "2026-01-30"
 language = "th"
-version = "0.1.0"
+version = "0.1.1"
 
 [template]
 dir = "template"

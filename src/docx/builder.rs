@@ -507,8 +507,7 @@ pub(crate) fn build_document(
     let mut hyperlink_ctx = HyperlinkContext::new();
     let mut numbering_ctx = NumberingContext::new();
 
-    // Image IDs are handled by RelIdManager now
-    let mut image_id_counter: u32 = 10000 + config.id_offset;
+
 
     let mut footnotes = FootnotesXml::new();
 
@@ -549,7 +548,6 @@ pub(crate) fn build_document(
             image_ctx: &mut image_ctx,
             hyperlink_ctx: &mut hyperlink_ctx,
             numbering_ctx: &mut numbering_ctx,
-            image_id: &mut image_id_counter,
             doc,
             footnotes: &mut footnotes,
             toc_builder: &mut toc_builder,
@@ -895,8 +893,8 @@ pub(crate) struct BuildContextParams<'a> {
     pub image_ctx: &'a mut ImageContext,
     pub hyperlink_ctx: &'a mut HyperlinkContext,
     pub numbering_ctx: &'a mut NumberingContext,
-    pub image_id: &'a mut u32,
     pub doc: &'a ParsedDocument,
+
     pub footnotes: &'a mut FootnotesXml,
     pub toc_builder: &'a mut TocBuilder,
     pub bookmark_id_counter: &'a mut u32,
@@ -914,8 +912,8 @@ pub(crate) struct BuildContext<'a> {
     pub image_ctx: &'a mut ImageContext,
     pub hyperlink_ctx: &'a mut HyperlinkContext,
     pub numbering_ctx: &'a mut NumberingContext,
-    pub image_id: &'a mut u32,
     pub doc: &'a ParsedDocument,
+
     pub footnotes: &'a mut FootnotesXml,
     pub toc_builder: &'a mut TocBuilder,
     pub bookmark_id_counter: &'a mut u32,
@@ -934,7 +932,6 @@ impl<'a> BuildContext<'a> {
             image_ctx: params.image_ctx,
             hyperlink_ctx: params.hyperlink_ctx,
             numbering_ctx: params.numbering_ctx,
-            image_id: params.image_id,
             doc: params.doc,
             footnotes: params.footnotes,
             toc_builder: params.toc_builder,
@@ -998,11 +995,13 @@ fn block_to_elements(
                 .map(|img| (img.width_emu, img.height_emu))
                 .unwrap_or((5486400, 3657600)); // Default 6x4 inches
 
+            let image_id = ctx.rel_manager.next_image_id();
+
             // Create image element
             let mut img = ImageElement::new(&rel_id, width_emu, height_emu)
                 .alt_text(alt)
                 .name(src)
-                .id(*ctx.image_id);
+                .id(image_id);
 
             // Apply template effects if available
             if let Some(tmpl) = ctx.image_template {
@@ -1045,7 +1044,7 @@ fn block_to_elements(
                 }
             }
 
-            *ctx.image_id += 1;
+
 
             // Get figure number (either from xref or sequential)
             let figure_number = if let Some(fig_id) = id {
@@ -1119,8 +1118,9 @@ fn block_to_elements(
                         ctx.xref_ctx.register_figure(fig_id, "Mermaid Diagram");
                     }
 
+                    let image_id = ctx.rel_manager.next_image_id();
                     // Generate a virtual filename
-                    let filename = format!("mermaid{}.svg", ctx.image_id);
+                    let filename = format!("mermaid{}.svg", image_id);
 
                     // Add to image context as SVG
                     let rel_id = ctx.image_ctx.add_image_data(
@@ -1141,42 +1141,15 @@ fn block_to_elements(
                     let mut img = ImageElement::new(&rel_id, width_emu, height_emu)
                         .alt_text("Mermaid Diagram")
                         .name(&filename)
-                        .id(*ctx.image_id);
+                        .id(image_id);
 
-                    // Apply template effects if available
+                    // For Mermaid diagrams, only apply alignment (no border, shadow, or padding)
                     if let Some(tmpl) = ctx.image_template {
-                        // Apply border
-                        if let Some(ref border) = tmpl.border {
-                            img = img.with_border(crate::docx::ooxml::ImageBorderEffect {
-                                fill_type: border.fill_type.clone(),
-                                color: border.color.clone(),
-                                is_scheme_color: border.is_scheme_color,
-                                width: border.width,
-                            });
-                        }
-
-                        // Apply shadow
-                        if let Some(ref shadow) = tmpl.shadow {
-                            img = img.with_shadow(crate::docx::ooxml::ImageShadowEffect {
-                                blur_radius: shadow.blur_radius,
-                                distance: shadow.distance,
-                                direction: shadow.direction,
-                                alignment: shadow.alignment.clone(),
-                                color: shadow.color.clone(),
-                                alpha: shadow.alpha,
-                            });
-                        }
-
-                        // Note: effect_extent (padding) is intentionally NOT applied to mermaid diagrams
-                        // as they typically don't need the extra spacing that regular images with shadows do
-
-                        // Apply alignment
                         if !tmpl.alignment.is_empty() {
                             img = img.with_alignment(&tmpl.alignment);
                         }
                     }
 
-                    *ctx.image_id += 1;
 
                     // Build result elements
                     let mut elements = vec![DocElement::Image(img)];
@@ -2066,7 +2039,6 @@ fn inline_to_children(
                         image_ctx: &mut ImageContext::new(), // Temporary
                         hyperlink_ctx: ctx.hyperlink_ctx, // Re-use? Hyperlinks in footnotes need relationships too
                         numbering_ctx: &mut footnote_numbering_ctx,
-                        image_id: &mut 0, // Temporary
                         doc: ctx.doc,
                         footnotes: ctx.footnotes,
                         toc_builder: &mut footnote_toc_builder,

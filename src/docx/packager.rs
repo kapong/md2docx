@@ -15,7 +15,9 @@ use crate::error::Result;
 /// Assembles all OOXML components into a valid DOCX (ZIP) file.
 pub(crate) struct Packager<W: Write + Seek> {
     writer: ZipWriter<W>,
+    added_files: std::collections::HashSet<String>,
 }
+
 
 /// Custom document properties for packaging
 pub(crate) struct DocProps<'a> {
@@ -34,6 +36,7 @@ impl<W: Write + Seek> Packager<W> {
     pub fn new(writer: W) -> Self {
         Self {
             writer: ZipWriter::new(writer),
+            added_files: std::collections::HashSet::new(),
         }
     }
 
@@ -132,8 +135,12 @@ impl<W: Write + Seek> Packager<W> {
 
     /// Write a file to the ZIP archive
     fn write_file(&mut self, path: &str, content: &[u8]) -> Result<()> {
+        if self.added_files.contains(path) {
+            return Ok(());
+        }
         self.writer.start_file(path, Self::get_file_options())?;
         self.writer.write_all(content)?;
+        self.added_files.insert(path.to_string());
         Ok(())
     }
 

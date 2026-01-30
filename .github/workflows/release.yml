@@ -109,15 +109,47 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # Fetch and checkout main branch (since we are in detached HEAD)
+          # Fetch and checkout main branch
           git fetch origin main:main
           git checkout main
           
-          # Update the formula with new versions and SHAs
-          sed -i "s/version \".*\"/version \"$VERSION\"/" Formula/md2docx.rb
-          sed -i "s/sha256 \"REPLACE_WITH_ARM64_SHA256\"/sha256 \"$ARM64_SHA\"/" Formula/md2docx.rb
-          sed -i "s/sha256 \"REPLACE_WITH_X86_64_SHA256\"/sha256 \"$X64_SHA\"/" Formula/md2docx.rb
-          sed -i "s/sha256 \"REPLACE_WITH_LINUX_SHA256\"/sha256 \"$LINUX_SHA\"/" Formula/md2docx.rb
+          # Overwrite Formula/md2docx.rb with clean template
+          cat <<EOF > Formula/md2docx.rb
+          class Md2docx < Formula
+            desc "Markdown to professional DOCX converter with native Thai support"
+            homepage "https://github.com/kapong/md2docx"
+            version "$VERSION"
+
+            if OS.mac?
+              if Hardware::CPU.arm?
+                url "https://github.com/kapong/md2docx/releases/download/v#{version}/md2docx-darwin-arm64"
+                sha256 "$ARM64_SHA"
+              else
+                url "https://github.com/kapong/md2docx/releases/download/v#{version}/md2docx-darwin-x86_64"
+                sha256 "$X64_SHA"
+              end
+            elsif OS.linux?
+              url "https://github.com/kapong/md2docx/releases/download/v#{version}/md2docx-linux-x86_64"
+              sha256 "$LINUX_SHA"
+            end
+
+            def install
+              binary_name = if OS.mac?
+                Hardware::CPU.arm? ? "md2docx-darwin-arm64" : "md2docx-darwin-x86_64"
+              else
+                "md2docx-linux-x86_64"
+              end
+              bin.install binary_name => "md2docx"
+            end
+
+            test do
+              system "#{bin}/md2docx", "--version"
+            end
+          end
+          EOF
+          
+          # Remove leading tabs/spaces from heredoc if needed, but here we'll just commit it as is
+          # (Homebrew is fine with indentation)
           
           git add Formula/md2docx.rb
           git commit -m "chore: update Homebrew formula to v$VERSION" || echo "No changes to commit"

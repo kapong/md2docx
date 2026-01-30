@@ -10,7 +10,7 @@ use crate::template::extract::table::{BorderStyle, BorderStyles, CellMargins};
 
 /// Header and footer references for a section
 #[derive(Debug, Clone, Default)]
-pub struct HeaderFooterRefs {
+pub(crate) struct HeaderFooterRefs {
     pub default_header_id: Option<String>, // rId for default header
     pub first_header_id: Option<String>,   // rId for first page header (can be empty)
     pub default_footer_id: Option<String>, // rId for default footer
@@ -332,14 +332,14 @@ impl Default for Run {
 
 /// Bookmark start element
 #[derive(Debug, Clone)]
-pub struct BookmarkStart {
+pub(crate) struct BookmarkStart {
     pub id: u32,      // Unique numeric ID
     pub name: String, // Bookmark name (e.g., "_Toc1_Introduction")
 }
 
 /// Hyperlink element for paragraphs
 #[derive(Debug, Clone)]
-pub struct Hyperlink {
+pub(crate) struct Hyperlink {
     pub id: String,         // Relationship ID (rId...)
     pub children: Vec<Run>, // Hyperlinks usually contain runs
 }
@@ -360,7 +360,7 @@ impl Hyperlink {
 
 /// Child elements of a paragraph (Run or Hyperlink)
 #[derive(Debug, Clone)]
-pub enum ParagraphChild {
+pub(crate) enum ParagraphChild {
     Run(Run),
     Hyperlink(Hyperlink),
 }
@@ -369,7 +369,7 @@ pub enum ParagraphChild {
 #[derive(Debug, Clone)]
 pub struct Paragraph {
     pub style_id: Option<String>,
-    pub children: Vec<ParagraphChild>,
+    pub(crate) children: Vec<ParagraphChild>,
     pub numbering_id: Option<u32>,
     pub numbering_level: Option<u32>,
     pub align: Option<String>,       // "left", "center", "right", "both"
@@ -384,9 +384,9 @@ pub struct Paragraph {
     pub section_break: Option<String>, // "nextPage", "continuous", "evenPage", "oddPage"
     pub page_num_start: Option<u32>,   // Page number to restart at for section break
     pub suppress_header_footer: bool,  // Suppress header/footer references in sectPr
-    pub empty_header_footer_refs: Option<HeaderFooterRefs>, // Empty header/footer refs to use when suppressing
-    pub bookmark_start: Option<BookmarkStart>,              // Bookmark start element
-    pub bookmark_end: bool,                                 // If true, close bookmark after content
+    pub(crate) empty_header_footer_refs: Option<HeaderFooterRefs>, // Empty header/footer refs to use when suppressing
+    pub(crate) bookmark_start: Option<BookmarkStart>,              // Bookmark start element
+    pub(crate) bookmark_end: bool, // If true, close bookmark after content
     // Page layout for section breaks (in twips)
     pub sect_page_width: Option<u32>,    // Page width for sectPr
     pub sect_page_height: Option<u32>,   // Page height for sectPr
@@ -452,7 +452,7 @@ impl Paragraph {
     }
 
     /// Add a hyperlink to the paragraph
-    pub fn add_hyperlink(mut self, hyperlink: Hyperlink) -> Self {
+    pub(crate) fn add_hyperlink(mut self, hyperlink: Hyperlink) -> Self {
         self.children.push(ParagraphChild::Hyperlink(hyperlink));
         self
     }
@@ -557,39 +557,29 @@ impl Paragraph {
     /// Set empty header/footer refs to explicitly suppress inheritance
     /// When set, these refs (pointing to empty header/footer files) will be used
     /// instead of inheriting from the previous section
-    pub fn with_empty_header_footer_refs(mut self, refs: HeaderFooterRefs) -> Self {
+    #[allow(dead_code)]
+    pub(crate) fn with_empty_header_footer_refs(mut self, refs: HeaderFooterRefs) -> Self {
         self.empty_header_footer_refs = Some(refs);
         self.suppress_header_footer = true; // Also set suppress flag
         self
     }
 
     /// Set page layout for section break (in twips)
-    pub fn with_page_layout(
-        mut self,
-        width: Option<u32>,
-        height: Option<u32>,
-        margin_top: Option<u32>,
-        margin_right: Option<u32>,
-        margin_bottom: Option<u32>,
-        margin_left: Option<u32>,
-        margin_header: Option<u32>,
-        margin_footer: Option<u32>,
-        margin_gutter: Option<u32>,
-    ) -> Self {
-        self.sect_page_width = width;
-        self.sect_page_height = height;
-        self.sect_margin_top = margin_top;
-        self.sect_margin_right = margin_right;
-        self.sect_margin_bottom = margin_bottom;
-        self.sect_margin_left = margin_left;
-        self.sect_margin_header = margin_header;
-        self.sect_margin_footer = margin_footer;
-        self.sect_margin_gutter = margin_gutter;
+    pub(crate) fn with_page_layout(mut self, layout: PageLayout) -> Self {
+        self.sect_page_width = layout.width;
+        self.sect_page_height = layout.height;
+        self.sect_margin_top = layout.margin_top;
+        self.sect_margin_right = layout.margin_right;
+        self.sect_margin_bottom = layout.margin_bottom;
+        self.sect_margin_left = layout.margin_left;
+        self.sect_margin_header = layout.margin_header;
+        self.sect_margin_footer = layout.margin_footer;
+        self.sect_margin_gutter = layout.margin_gutter;
         self
     }
 
     /// Wrap paragraph content with a bookmark
-    pub fn with_bookmark(mut self, id: u32, name: &str) -> Self {
+    pub(crate) fn with_bookmark(mut self, id: u32, name: &str) -> Self {
         self.bookmark_start = Some(BookmarkStart {
             id,
             name: name.to_string(),
@@ -599,7 +589,7 @@ impl Paragraph {
     }
 
     /// Write paragraph XML to a writer
-    pub fn write_xml<W: std::io::Write>(
+    pub(crate) fn write_xml<W: std::io::Write>(
         &self,
         writer: &mut Writer<W>,
         header_footer_refs: Option<&HeaderFooterRefs>,
@@ -903,6 +893,81 @@ impl Default for Paragraph {
     }
 }
 
+/// Page layout configuration for section breaks (in twips)
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PageLayout {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub margin_top: Option<u32>,
+    pub margin_right: Option<u32>,
+    pub margin_bottom: Option<u32>,
+    pub margin_left: Option<u32>,
+    pub margin_header: Option<u32>,
+    pub margin_footer: Option<u32>,
+    pub margin_gutter: Option<u32>,
+}
+
+impl PageLayout {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[allow(dead_code)]
+    pub fn width(mut self, width: u32) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn height(mut self, height: u32) -> Self {
+        self.height = Some(height);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn margin_top(mut self, margin: u32) -> Self {
+        self.margin_top = Some(margin);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn margin_right(mut self, margin: u32) -> Self {
+        self.margin_right = Some(margin);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn margin_bottom(mut self, margin: u32) -> Self {
+        self.margin_bottom = Some(margin);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn margin_left(mut self, margin: u32) -> Self {
+        self.margin_left = Some(margin);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn margin_header(mut self, margin: u32) -> Self {
+        self.margin_header = Some(margin);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn margin_footer(mut self, margin: u32) -> Self {
+        self.margin_footer = Some(margin);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn margin_gutter(mut self, margin: u32) -> Self {
+        self.margin_gutter = Some(margin);
+        self
+    }
+}
+
 /// Image element for embedding in document
 #[derive(Debug, Clone)]
 pub struct ImageElement {
@@ -920,7 +985,7 @@ pub struct ImageElement {
 
 /// Image border effect for OOXML generation
 #[derive(Debug, Clone)]
-pub struct ImageBorderEffect {
+pub(crate) struct ImageBorderEffect {
     /// Fill type: "solid", "none"
     pub fill_type: String,
     /// Color value (hex without # or scheme name)
@@ -933,7 +998,7 @@ pub struct ImageBorderEffect {
 
 /// Image shadow effect for OOXML generation
 #[derive(Debug, Clone)]
-pub struct ImageShadowEffect {
+pub(crate) struct ImageShadowEffect {
     /// Blur radius in EMUs
     pub blur_radius: u32,
     /// Shadow distance in EMUs
@@ -950,7 +1015,7 @@ pub struct ImageShadowEffect {
 
 /// Effect extent for shadow/border space
 #[derive(Debug, Clone, Default)]
-pub struct ImageEffectExtent {
+pub(crate) struct ImageEffectExtent {
     pub left: u32,
     pub top: u32,
     pub right: u32,
@@ -1009,6 +1074,7 @@ impl ImageElement {
     }
 
     /// Helper to create from dimensions in inches
+    #[allow(dead_code)]
     pub fn from_inches(rel_id: &str, width_inches: f64, height_inches: f64) -> Self {
         const EMU_PER_INCH: i64 = 914400;
         Self::new(
@@ -1021,7 +1087,7 @@ impl ImageElement {
 
 /// Document element (paragraph, table, or image)
 #[derive(Debug, Clone)]
-pub enum DocElement {
+pub(crate) enum DocElement {
     Paragraph(Box<Paragraph>),
     Table(Table),
     Image(ImageElement),
@@ -1030,7 +1096,8 @@ pub enum DocElement {
 
 /// Table width type
 #[derive(Debug, Clone, Copy, Default)]
-pub enum TableWidth {
+#[allow(dead_code)]
+pub(crate) enum TableWidth {
     #[default]
     Auto,
     Dxa(u32), // Absolute width in twips
@@ -1040,10 +1107,10 @@ pub enum TableWidth {
 /// Table structure
 #[derive(Debug, Clone)]
 pub struct Table {
-    pub rows: Vec<TableRow>,
+    pub(crate) rows: Vec<TableRow>,
     pub column_widths: Vec<u32>, // In twips (20ths of a point)
     pub has_header_row: bool,
-    pub width: TableWidth,
+    pub(crate) width: TableWidth,
     pub borders: Option<BorderStyles>, // Template borders
     pub cell_margins: Option<CellMargins>,
 }
@@ -1073,7 +1140,7 @@ impl Table {
     }
 
     /// Add a row to the table
-    pub fn add_row(mut self, row: TableRow) -> Self {
+    pub(crate) fn add_row(mut self, row: TableRow) -> Self {
         self.rows.push(row);
         self
     }
@@ -1091,7 +1158,7 @@ impl Table {
     }
 
     /// Set table width
-    pub fn width(mut self, width: TableWidth) -> Self {
+    pub(crate) fn width(mut self, width: TableWidth) -> Self {
         self.width = width;
         self
     }
@@ -1099,14 +1166,14 @@ impl Table {
 
 /// Table row
 #[derive(Debug, Clone)]
-pub struct TableRow {
+pub(crate) struct TableRow {
     pub cells: Vec<TableCellElement>,
     pub is_header: bool,
 }
 
 /// Table cell
 #[derive(Debug, Clone)]
-pub struct TableCellElement {
+pub(crate) struct TableCellElement {
     pub paragraphs: Vec<Paragraph>,
     pub width: TableWidth,
     pub alignment: Option<String>,          // "left", "center", "right"
@@ -1171,6 +1238,7 @@ impl TableCellElement {
     }
 
     /// Set cell shading color (hex without #)
+    #[allow(dead_code)]
     pub fn shading(mut self, color: &str) -> Self {
         self.shading = Some(color.to_string());
         self
@@ -1197,7 +1265,7 @@ impl Default for TableCellElement {
 
 /// Main Document XML generator
 #[derive(Debug)]
-pub struct DocumentXml {
+pub(crate) struct DocumentXml {
     pub elements: Vec<DocElement>,
     // Page settings (A4 default)
     pub width: u32,  // Twips (11906 for A4)
@@ -1245,11 +1313,13 @@ impl DocumentXml {
     }
 
     /// Add a table to the document
+    #[allow(dead_code)]
     pub fn add_table(&mut self, table: Table) {
         self.elements.push(DocElement::Table(table));
     }
 
     /// Add an image element
+    #[allow(dead_code)]
     pub fn add_image(&mut self, image: ImageElement) {
         self.elements.push(DocElement::Image(image));
     }
@@ -1260,6 +1330,7 @@ impl DocumentXml {
     }
 
     /// Set page size (in twips)
+    #[allow(dead_code)]
     pub fn page_size(mut self, width: u32, height: u32) -> Self {
         self.width = width;
         self.height = height;
@@ -1267,6 +1338,7 @@ impl DocumentXml {
     }
 
     /// Set margins (in twips)
+    #[allow(dead_code)]
     pub fn margins(
         mut self,
         top: u32,
@@ -1286,6 +1358,7 @@ impl DocumentXml {
     }
 
     /// Set header/footer references
+    #[allow(dead_code)]
     pub fn with_header_footer(mut self, refs: HeaderFooterRefs) -> Self {
         self.header_footer_refs = refs;
         self

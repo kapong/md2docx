@@ -37,7 +37,10 @@ pub mod extract;
 pub mod placeholder;
 pub mod render;
 
-pub use extract::{CoverTemplate, HeaderFooterTemplate, ImageTemplate, TableTemplate};
+pub use extract::{
+    CoverElement, CoverTemplate, HeaderFooterContent, HeaderFooterTemplate, ImageTemplate,
+    MediaFile, PageMargins, ShapeType, TableTemplate,
+};
 pub use placeholder::{
     extract_placeholders, has_placeholders, replace_placeholders, PlaceholderContext,
 };
@@ -162,10 +165,10 @@ impl TemplateDir {
 /// Collection of all loaded templates
 #[derive(Debug, Clone, Default)]
 pub struct TemplateSet {
-    pub cover: Option<CoverTemplate>,
-    pub table: Option<TableTemplate>,
-    pub image: Option<ImageTemplate>,
-    pub header_footer: Option<HeaderFooterTemplate>,
+    pub(crate) cover: Option<CoverTemplate>,
+    pub(crate) table: Option<TableTemplate>,
+    pub(crate) image: Option<ImageTemplate>,
+    pub(crate) header_footer: Option<HeaderFooterTemplate>,
 }
 
 impl TemplateSet {

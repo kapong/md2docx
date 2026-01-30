@@ -1,0 +1,19 @@
+name: md2docx
+
+services:
+  md2docx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: md2docx:latest
+    container_name: md2docx
+    volumes:
+      - type: bind
+        source: ./docs
+        target: /workspace/docs
+        read_only: true
+      - type: bind
+        source: ./output
+        target: /workspace/output
+    working_dir: /workspace
+    command: build -d /workspace/docs -o /workspace/output/output.docx

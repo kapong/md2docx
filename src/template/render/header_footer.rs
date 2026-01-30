@@ -15,7 +15,7 @@ use std::collections::HashMap;
 /// Context for placeholder replacement
 /// Values come from the document section of md2docx.toml
 #[derive(Debug, Clone, Default)]
-pub struct HeaderFooterContext {
+pub(crate) struct HeaderFooterContext {
     pub title: String,
     pub subtitle: String,
     pub author: String,
@@ -24,6 +24,7 @@ pub struct HeaderFooterContext {
 
 impl HeaderFooterContext {
     /// Create a new context with required fields
+    #[allow(dead_code)]
     pub fn new(title: impl Into<String>, author: impl Into<String>) -> Self {
         Self {
             title: title.into(),
@@ -33,12 +34,14 @@ impl HeaderFooterContext {
     }
 
     /// Set the subtitle
+    #[allow(dead_code)]
     pub fn with_subtitle(mut self, subtitle: impl Into<String>) -> Self {
         self.subtitle = subtitle.into();
         self
     }
 
     /// Set the date
+    #[allow(dead_code)]
     pub fn with_date(mut self, date: impl Into<String>) -> Self {
         self.date = date.into();
         self
@@ -47,7 +50,7 @@ impl HeaderFooterContext {
 
 /// Rendered header/footer ready to be written to DOCX
 #[derive(Debug, Clone)]
-pub struct RenderedHeaderFooter {
+pub(crate) struct RenderedHeaderFooter {
     /// The XML content with placeholders replaced
     pub xml: Vec<u8>,
     /// Media files that need to be included (with remapped rIds)
@@ -66,7 +69,7 @@ pub struct RenderedHeaderFooter {
 /// - {{page}} -> PAGE field
 /// - {{numpages}} -> NUMPAGES field
 /// - {{chapter}} -> STYLEREF "Heading 1" field
-pub fn render_header_footer(
+pub(crate) fn render_header_footer(
     content: &crate::template::extract::header_footer::HeaderFooterContent,
     ctx: &HeaderFooterContext,
     rel_id_offset: u32,
@@ -113,7 +116,7 @@ pub fn render_header_footer(
 }
 
 /// Render the default header from a template
-pub fn render_default_header(
+pub(crate) fn render_default_header(
     template: &HeaderFooterTemplate,
     ctx: &HeaderFooterContext,
     rel_id_offset: u32,
@@ -127,7 +130,7 @@ pub fn render_default_header(
 }
 
 /// Render the default footer from a template
-pub fn render_default_footer(
+pub(crate) fn render_default_footer(
     template: &HeaderFooterTemplate,
     ctx: &HeaderFooterContext,
     rel_id_offset: u32,
@@ -141,7 +144,7 @@ pub fn render_default_footer(
 }
 
 /// Render the first page header from a template
-pub fn render_first_page_header(
+pub(crate) fn render_first_page_header(
     template: &HeaderFooterTemplate,
     ctx: &HeaderFooterContext,
     rel_id_offset: u32,
@@ -155,7 +158,7 @@ pub fn render_first_page_header(
 }
 
 /// Render the first page footer from a template
-pub fn render_first_page_footer(
+pub(crate) fn render_first_page_footer(
     template: &HeaderFooterTemplate,
     ctx: &HeaderFooterContext,
     rel_id_offset: u32,
@@ -172,7 +175,8 @@ pub fn render_first_page_footer(
 ///
 /// Creates a .rels file that maps relationship IDs to media file targets.
 /// This is required for images in headers/footers to display correctly.
-pub fn generate_header_footer_rels_xml(media: &[(String, MediaFile)]) -> Vec<u8> {
+#[allow(dead_code)]
+pub(crate) fn generate_header_footer_rels_xml(media: &[(String, MediaFile)]) -> Vec<u8> {
     generate_header_footer_rels_xml_with_prefix(media, "")
 }
 
@@ -180,7 +184,7 @@ pub fn generate_header_footer_rels_xml(media: &[(String, MediaFile)]) -> Vec<u8>
 ///
 /// The `prefix` is added to each media filename to avoid conflicts with images
 /// from other templates (e.g., cover.docx vs header-footer.docx).
-pub fn generate_header_footer_rels_xml_with_prefix(
+pub(crate) fn generate_header_footer_rels_xml_with_prefix(
     media: &[(String, MediaFile)],
     prefix: &str,
 ) -> Vec<u8> {
@@ -303,6 +307,9 @@ fn replace_chapter_placeholder(xml: &str) -> String {
     xml.replace("{{chapter}}", chapter_field)
 }
 
+/// Media remapping result containing remapped media files and ID replacements
+pub(crate) type MediaRemapResult = (Vec<(String, MediaFile)>, Vec<(String, String)>);
+
 /// Remap relationship IDs for media files
 ///
 /// This ensures that when we embed media files in the final document,
@@ -315,7 +322,7 @@ fn remap_media_ids(
     rel_id_map: &HashMap<String, String>,
     offset: u32,
     media_files: &[MediaFile],
-) -> (Vec<(String, MediaFile)>, Vec<(String, String)>) {
+) -> MediaRemapResult {
     let mut media = Vec::new();
     let mut rid_replacements = Vec::new();
 

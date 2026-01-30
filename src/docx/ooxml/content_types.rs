@@ -7,7 +7,7 @@ use std::io::Cursor;
 use crate::error::Result;
 
 /// Content types for DOCX parts
-pub struct ContentTypes {
+pub(crate) struct ContentTypes {
     /// Additional content types (for images, etc.)
     extensions: Vec<(String, String)>, // (extension, content_type)
     overrides: Vec<(String, String)>, // (part_name, content_type)

@@ -171,11 +171,17 @@ fn find_header_footer_files(rels_xml: &str, hf_type: &str) -> Vec<String> {
     let relationship_regex = regex::Regex::new(
         r#"<Relationship[^>]*Type="[^"]*/(header|footer)"[^>]*Target="([^"]*)"[^>]*/>"#,
     )
-    .unwrap();
+    .expect("relationship_regex should be valid");
 
     for cap in relationship_regex.captures_iter(rels_xml) {
-        let type_match = cap.get(1).unwrap().as_str();
-        let target = cap.get(2).unwrap().as_str();
+        let type_match = cap
+            .get(1)
+            .expect("relationship_regex should have capture group 1")
+            .as_str();
+        let target = cap
+            .get(2)
+            .expect("relationship_regex should have capture group 2")
+            .as_str();
 
         if type_match == hf_type {
             // Target might be like "header1.xml" or "header2.xml"
@@ -203,12 +209,21 @@ fn categorize_header_footer_files(
     let reference_regex = regex::Regex::new(
         r#"<w:(header|footer)Reference[^>]*w:type="(default|first|even)"[^>]*r:id="([^"]*)"[^>]*/>"#,
     )
-    .unwrap();
+    .expect("reference_regex should be valid");
 
     for cap in reference_regex.captures_iter(document_xml) {
-        let ref_type = cap.get(1).unwrap().as_str();
-        let ref_subtype = cap.get(2).unwrap().as_str();
-        let r_id = cap.get(3).unwrap().as_str();
+        let ref_type = cap
+            .get(1)
+            .expect("reference_regex should have capture group 1")
+            .as_str();
+        let ref_subtype = cap
+            .get(2)
+            .expect("reference_regex should have capture group 2")
+            .as_str();
+        let r_id = cap
+            .get(3)
+            .expect("reference_regex should have capture group 3")
+            .as_str();
 
         if ref_type != hf_type {
             continue;
@@ -245,11 +260,14 @@ fn find_target_by_rid(rels_xml: &str, r_id: &str) -> Option<String> {
         r#"<Relationship[^>]*Id="{}"[^>]*Target="([^"]*)"[^>]*/>"#,
         regex::escape(r_id)
     ))
-    .unwrap();
+    .expect("find_target_by_rid regex should be valid");
 
-    regex
-        .captures(rels_xml)
-        .map(|cap| cap.get(1).unwrap().as_str().to_string())
+    regex.captures(rels_xml).map(|cap| {
+        cap.get(1)
+            .expect("find_target_by_rid regex should have capture group 1")
+            .as_str()
+            .to_string()
+    })
 }
 
 /// Extract header/footer content from a file in the archive
@@ -291,10 +309,15 @@ fn extract_header_footer_content<R: Read + std::io::Seek>(
 /// Looks for {{placeholder}} patterns within <w:t> elements
 pub fn extract_placeholders_from_xml(xml: &str) -> Vec<String> {
     let mut placeholders = Vec::new();
-    let placeholder_regex = regex::Regex::new(r"\{\{(\w+)\}\}").unwrap();
+    let placeholder_regex =
+        regex::Regex::new(r"\{\{(\w+)\}\}").expect("placeholder_regex should be valid");
 
     for cap in placeholder_regex.captures_iter(xml) {
-        let key = cap.get(1).unwrap().as_str().to_string();
+        let key = cap
+            .get(1)
+            .expect("placeholder_regex should have capture group 1")
+            .as_str()
+            .to_string();
         if !placeholders.contains(&key) {
             placeholders.push(key);
         }
@@ -324,11 +347,20 @@ fn extract_rel_id_map<R: Read + std::io::Seek>(
 
     // Parse relationships
     let relationship_regex =
-        regex::Regex::new(r#"<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*/>"#).unwrap();
+        regex::Regex::new(r#"<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*/>"#)
+            .expect("relationship_regex should be valid");
 
     for cap in relationship_regex.captures_iter(&rels_xml) {
-        let r_id = cap.get(1).unwrap().as_str().to_string();
-        let target = cap.get(2).unwrap().as_str().to_string();
+        let r_id = cap
+            .get(1)
+            .expect("relationship_regex should have capture group 1")
+            .as_str()
+            .to_string();
+        let target = cap
+            .get(2)
+            .expect("relationship_regex should have capture group 2")
+            .as_str()
+            .to_string();
         rel_id_map.insert(r_id, target);
     }
 
@@ -347,10 +379,14 @@ fn collect_media_files<R: Read + std::io::Seek>(
     };
 
     // Find all r:embed references in the XML
-    let embed_regex = regex::Regex::new(r#"r:embed="([^"]*)""#).unwrap();
+    let embed_regex =
+        regex::Regex::new(r#"r:embed="([^"]*)""#).expect("embed_regex pattern should be valid");
 
     for cap in embed_regex.captures_iter(&content.raw_xml) {
-        let r_id = cap.get(1).unwrap().as_str();
+        let r_id = cap
+            .get(1)
+            .expect("embed_regex should have capture group 1")
+            .as_str();
 
         // Look up the target in the rel_id_map
         if let Some(target) = content.rel_id_map.get(r_id) {

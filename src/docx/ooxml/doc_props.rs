@@ -92,12 +92,14 @@ impl CoreProperties {
     }
 
     /// Set document title
+    #[allow(dead_code)]
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
     /// Set document creator
+    #[allow(dead_code)]
     pub fn with_creator(mut self, creator: impl Into<String>) -> Self {
         self.creator = Some(creator.into());
         self

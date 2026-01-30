@@ -7,6 +7,7 @@ use std::io::Cursor;
 use crate::error::Result;
 
 /// kompleks script size in half-points (14pt = 28)
+#[allow(dead_code)]
 pub const DEFAULT_THAI_SIZE: u32 = 28;
 
 /// Font configuration
@@ -84,6 +85,7 @@ impl Language {
 
 /// Style type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum StyleType {
     Paragraph,
     Character,
@@ -270,18 +272,21 @@ impl Style {
     }
 
     /// Set as hidden
+    #[allow(dead_code)]
     pub fn hidden(mut self) -> Self {
         self.hidden = true;
         self
     }
 
     /// Set as semi-hidden
+    #[allow(dead_code)]
     pub fn semi_hidden(mut self) -> Self {
         self.semi_hidden = true;
         self
     }
 
     /// Set unhide when used
+    #[allow(dead_code)]
     pub fn unhide_when_used(mut self) -> Self {
         self.unhide_when_used = true;
         self
@@ -295,7 +300,7 @@ impl Style {
 }
 
 /// Styles document generator
-pub struct StylesDocument {
+pub(crate) struct StylesDocument {
     styles: Vec<Style>,
     lang: Language,
     font_config: Option<FontConfig>,

@@ -1,0 +1,6 @@
+.git
+.gitignore
+target/
+output/
+*.docx
+.DS_Store

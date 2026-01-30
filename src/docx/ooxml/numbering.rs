@@ -18,7 +18,9 @@ use std::io::Cursor;
 /// Each list in the document gets its own unique numId that references
 /// the appropriate abstractNumId (1 for ordered, 2 for unordered).
 /// This ensures each list restarts numbering independently.
-pub fn generate_numbering_xml_with_context(numbering_ctx: &NumberingContext) -> Result<Vec<u8>> {
+pub(crate) fn generate_numbering_xml_with_context(
+    numbering_ctx: &NumberingContext,
+) -> Result<Vec<u8>> {
     let buffer = Cursor::new(Vec::new());
     let mut writer = Writer::new(buffer);
 
@@ -67,6 +69,7 @@ pub fn generate_numbering_xml_with_context(numbering_ctx: &NumberingContext) -> 
 ///
 /// numId 1 references abstractNumId 1 (ordered)
 /// numId 2 references abstractNumId 2 (unordered)
+#[allow(dead_code)]
 pub fn generate_numbering_xml() -> Result<Vec<u8>> {
     let buffer = Cursor::new(Vec::new());
     let mut writer = Writer::new(buffer);

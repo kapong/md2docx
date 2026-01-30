@@ -9,21 +9,29 @@ use regex::Regex;
 use std::collections::HashMap;
 
 // Include patterns - match whole line directives
-static INCLUDE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\{!include:([^}]+)\}$").unwrap());
+static INCLUDE_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^\{!include:([^}]+)\}$").expect("INCLUDE_PATTERN regex should be valid")
+});
 
 static CODE_INCLUDE_PATTERN: Lazy<Regex> = Lazy::new(|| {
     // Matches: {!code:path} or {!code:path:start-end} or {!code:path:start-end:lang}
-    Regex::new(r"^\{!code:([^:}]+)(?::(\d+)-(\d+))?(?::([a-zA-Z0-9]+))?\}$").unwrap()
+    Regex::new(r"^\{!code:([^:}]+)(?::(\d+)-(\d+))?(?::([a-zA-Z0-9]+))?\}$")
+        .expect("CODE_INCLUDE_PATTERN regex should be valid")
 });
 
-static HTML_ID_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"<!--\s*\{#([a-zA-Z0-9_:-]+)\}\s*-->").unwrap());
+static HTML_ID_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"<!--\s*\{#([a-zA-Z0-9_:-]+)\}\s*-->")
+        .expect("HTML_ID_PATTERN regex should be valid")
+});
 
-static TABLE_CAPTION_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^Table:\s*(.*)\s*\{#([a-zA-Z0-9_:-]+)\}$").unwrap());
+static TABLE_CAPTION_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^Table:\s*(.*)\s*\{#([a-zA-Z0-9_:-]+)\}$")
+        .expect("TABLE_CAPTION_PATTERN regex should be valid")
+});
 
-static TABLE_CAPTION_NO_ID_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^Table:\s*(.*)$").unwrap());
+static TABLE_CAPTION_NO_ID_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^Table:\s*(.*)$").expect("TABLE_CAPTION_NO_ID_PATTERN regex should be valid")
+});
 
 /// Builder for footnote definitions
 struct FootnoteBuilder {
@@ -279,7 +287,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                                 let (image, width) = if current_inlines.len() == 1 {
                                     (current_inlines.remove(0), None)
                                 } else {
-                                    let attrs = current_inlines.pop().unwrap(); // Text
+                                    let attrs = current_inlines
+                                        .pop()
+                                        .expect("attrs should exist when len == 2"); // Text
                                     let img = current_inlines.remove(0); // Image
                                     let width = if let Inline::Text(t) = attrs {
                                         extract_image_attributes(&t)
@@ -419,7 +429,12 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                                 match block {
                                     Block::Html(html) => {
                                         if let Some(cap) = HTML_ID_PATTERN.captures(html) {
-                                            id = Some(cap.get(1).unwrap().as_str().to_string());
+                                            id = Some(
+                                                cap.get(1)
+                                                    .expect("HTML_ID_PATTERN should have capture group 1")
+                                                    .as_str()
+                                                    .to_string(),
+                                            );
                                             // Mark for removal by changing to something else or we'll pop it
                                         }
                                     }
@@ -427,14 +442,27 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                                         let text = extract_inline_text(inlines);
                                         if let Some(cap) = TABLE_CAPTION_PATTERN.captures(&text) {
                                             caption = Some(
-                                                cap.get(1).unwrap().as_str().trim().to_string(),
+                                                cap.get(1)
+                                                    .expect("TABLE_CAPTION_PATTERN should have capture group 1")
+                                                    .as_str()
+                                                    .trim()
+                                                    .to_string(),
                                             );
-                                            id = Some(cap.get(2).unwrap().as_str().to_string());
+                                            id = Some(
+                                                cap.get(2)
+                                                    .expect("TABLE_CAPTION_PATTERN should have capture group 2")
+                                                    .as_str()
+                                                    .to_string(),
+                                            );
                                         } else if let Some(cap) =
                                             TABLE_CAPTION_NO_ID_PATTERN.captures(&text)
                                         {
                                             caption = Some(
-                                                cap.get(1).unwrap().as_str().trim().to_string(),
+                                                cap.get(1)
+                                                    .expect("TABLE_CAPTION_NO_ID_PATTERN should have capture group 1")
+                                                    .as_str()
+                                                    .trim()
+                                                    .to_string(),
                                             );
                                         }
                                     }
@@ -902,7 +930,11 @@ fn process_include_directives(blocks: Vec<Block>) -> Vec<Block> {
 
                             // Check for {!include:...}
                             if let Some(cap) = INCLUDE_PATTERN.captures(text) {
-                                let path = cap.get(1).unwrap().as_str().to_string();
+                                let path = cap
+                                    .get(1)
+                                    .expect("INCLUDE_PATTERN should have capture group 1")
+                                    .as_str()
+                                    .to_string();
                                 return vec![Block::Include {
                                     path,
                                     resolved: None,
@@ -911,11 +943,21 @@ fn process_include_directives(blocks: Vec<Block>) -> Vec<Block> {
 
                             // Check for {!code:...}
                             if let Some(cap) = CODE_INCLUDE_PATTERN.captures(text) {
-                                let path = cap.get(1).unwrap().as_str().to_string();
-                                let start_line =
-                                    cap.get(2).map(|m| m.as_str().parse::<u32>().unwrap());
-                                let end_line =
-                                    cap.get(3).map(|m| m.as_str().parse::<u32>().unwrap());
+                                let path = cap
+                                    .get(1)
+                                    .expect("CODE_INCLUDE_PATTERN should have capture group 1")
+                                    .as_str()
+                                    .to_string();
+                                let start_line = cap.get(2).map(|m| {
+                                    m.as_str()
+                                        .parse::<u32>()
+                                        .expect("start_line should be valid u32")
+                                });
+                                let end_line = cap.get(3).map(|m| {
+                                    m.as_str()
+                                        .parse::<u32>()
+                                        .expect("end_line should be valid u32")
+                                });
                                 let lang = cap.get(4).map(|m| m.as_str().to_string());
 
                                 return vec![Block::CodeInclude {
@@ -960,7 +1002,8 @@ fn process_include_directives(blocks: Vec<Block>) -> Vec<Block> {
 /// Process inlines to extract cross-references from text
 /// Converts `{ref:target}` patterns in text to Inline::CrossRef
 fn process_cross_refs(inlines: Vec<Inline>) -> Vec<Inline> {
-    let cross_ref_pattern = regex::Regex::new(r"\{ref:([a-zA-Z0-9_:-]+)\}").unwrap();
+    let cross_ref_pattern = regex::Regex::new(r"\{ref:([a-zA-Z0-9_:-]+)\}")
+        .expect("cross_ref_pattern regex should be valid");
 
     let mut result = Vec::new();
 
@@ -970,8 +1013,14 @@ fn process_cross_refs(inlines: Vec<Inline>) -> Vec<Inline> {
                 let mut last_end = 0;
 
                 for cap in cross_ref_pattern.captures_iter(&text) {
-                    let match_start = cap.get(0).unwrap().start();
-                    let match_end = cap.get(0).unwrap().end();
+                    let match_start = cap
+                        .get(0)
+                        .expect("cross_ref_pattern should have capture group 0")
+                        .start();
+                    let match_end = cap
+                        .get(0)
+                        .expect("cross_ref_pattern should have capture group 0")
+                        .end();
 
                     // Add text before the match
                     if match_start > last_end {
@@ -979,7 +1028,10 @@ fn process_cross_refs(inlines: Vec<Inline>) -> Vec<Inline> {
                     }
 
                     // Parse the reference target
-                    let target = cap.get(1).unwrap().as_str();
+                    let target = cap
+                        .get(1)
+                        .expect("cross_ref_pattern should have capture group 1")
+                        .as_str();
                     let (ref_type, actual_target) = parse_ref_target(target);
 
                     result.push(Inline::CrossRef {
@@ -1142,7 +1194,10 @@ fn extract_anchor_id(
                 let anchor_id = text[anchor_start + 2..anchor_start + anchor_end].to_string();
                 let mut new_content = content.clone();
 
-                if let Inline::Text(ref mut t) = new_content.last_mut().unwrap() {
+                if let Inline::Text(ref mut t) = new_content
+                    .last_mut()
+                    .expect("last_mut should succeed after cloning")
+                {
                     *t = format!(
                         "{}{}",
                         &text[..anchor_start],

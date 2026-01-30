@@ -1,6 +1,5 @@
 # Rust
 target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
 
@@ -17,8 +16,17 @@ Thumbs.db
 
 # Generated files
 *.docx
-examples/output/*.docx
+!examples/**/template/*.docx
+output/
+examples/**/output/
 
-# Debug/temp files (keep these out)
+# Debug/temp files
 temp/
 *.log
+.md2docx-cache/
+
+# Word temp files
+~$*.docx
+
+# Development notes (exclude from public release)
+plan.md

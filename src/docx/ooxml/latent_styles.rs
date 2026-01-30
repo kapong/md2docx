@@ -100,6 +100,7 @@ impl Default for LatentStyles {
 
 impl LatentStyles {
     /// Generate XML for the latentStyles element
+    #[allow(dead_code)]
     pub fn to_xml(&self) -> Result<Vec<u8>> {
         let mut writer = Writer::new(Cursor::new(Vec::new()));
 

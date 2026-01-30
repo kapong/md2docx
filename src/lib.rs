@@ -46,10 +46,10 @@ pub mod wasm;
 pub use docx::ooxml::{FootnotesXml, Language, Paragraph, Run};
 pub use error::{Error, Result};
 
-use docx::ooxml::{
-    generate_numbering_xml_with_context, ContentTypes, DocumentXml, Relationships, StylesDocument,
-};
-use docx::{build_document, Packager};
+use docx::builder::build_document;
+use docx::ooxml::numbering::generate_numbering_xml_with_context;
+use docx::ooxml::{ContentTypes, DocumentXml, Relationships, StylesDocument};
+use docx::packager::Packager;
 use parser::parse_markdown_with_frontmatter;
 use std::io::Cursor;
 
@@ -328,7 +328,7 @@ pub fn markdown_to_docx_with_templates(
 ) -> Result<Vec<u8>> {
     let parsed = parse_markdown_with_frontmatter(markdown);
 
-    let mut rel_manager = crate::docx::RelIdManager::new();
+    let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
     let table_template = templates.and_then(|t| t.table.as_ref());
     let image_template = templates.and_then(|t| t.image.as_ref());
     let mut build_result = build_document(
@@ -338,22 +338,22 @@ pub fn markdown_to_docx_with_templates(
         &mut rel_manager,
         table_template,
         image_template,
-    );
+    )?;
 
     // Apply templates if provided
     if let Some(template_set) = templates {
         // Apply cover template
         if let Some(cover) = &template_set.cover {
-            apply_cover_template(
-                &mut build_result,
+            apply_cover_template(CoverTemplateContext {
+                build_result: &mut build_result,
                 cover,
                 placeholder_ctx,
                 lang,
-                &mut rel_manager,
+                rel_manager: &mut rel_manager,
                 table_template,
                 image_template,
                 doc_config,
-            )?;
+            })?;
         }
     }
 
@@ -378,7 +378,7 @@ pub fn markdown_to_docx_with_templates(
                     {
                         if p.is_section_break() {
                             // Change section break to page break to keep TOC in same section as cover
-                            *p = Box::new(crate::docx::ooxml::Paragraph::new().page_break());
+                            **p = crate::docx::ooxml::Paragraph::new().page_break();
                         }
                     }
                 }
@@ -513,20 +513,20 @@ pub fn markdown_to_docx_with_templates(
 
     // Process headers
     let mut header_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (header_num, _, _) in &build_result.headers {
-        content_types.add_header(*header_num);
+    for entry in &build_result.headers {
+        content_types.add_header(entry.number);
         let rel_id = rel_manager.next_id();
-        doc_rels.add_header_with_id(&rel_id, *header_num);
-        header_rel_ids.push((*header_num, rel_id));
+        doc_rels.add_header_with_id(&rel_id, entry.number);
+        header_rel_ids.push((entry.number, rel_id));
     }
 
     // Process footers
     let mut footer_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (footer_num, _, _) in &build_result.footers {
-        content_types.add_footer(*footer_num);
+    for entry in &build_result.footers {
+        content_types.add_footer(entry.number);
         let rel_id = rel_manager.next_id();
-        doc_rels.add_footer_with_id(&rel_id, *footer_num);
-        footer_rel_ids.push((*footer_num, rel_id));
+        doc_rels.add_footer_with_id(&rel_id, entry.number);
+        footer_rel_ids.push((entry.number, rel_id));
     }
 
     // Update header/footer refs
@@ -565,14 +565,14 @@ pub fn markdown_to_docx_with_templates(
     let mut added_media_files: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Add headers
-    for (header_num, header_bytes, media) in &build_result.headers {
-        packager.add_header(*header_num, header_bytes)?;
+    for entry in &build_result.headers {
+        packager.add_header(entry.number, &entry.xml_bytes)?;
 
         // Add media files for this header (with header_ prefix)
-        for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() {
+        for mapping in &entry.media_files {
+            if !mapping.media_file.filename.is_empty() {
                 // Add header_ prefix to avoid conflicts with cover images
-                let prefixed_filename = format!("header_{}", media_file.filename);
+                let prefixed_filename = format!("header_{}", mapping.media_file.filename);
 
                 // Skip if already added
                 if added_media_files.contains(&prefixed_filename) {
@@ -580,7 +580,7 @@ pub fn markdown_to_docx_with_templates(
                 }
 
                 // Add the media file to the archive with prefixed name
-                packager.add_image(&prefixed_filename, &media_file.data)?;
+                packager.add_image(&prefixed_filename, &mapping.media_file.data)?;
                 added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
@@ -588,29 +588,37 @@ pub fn markdown_to_docx_with_templates(
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
-                content_types.add_image_extension(ext, &media_file.content_type);
+                content_types.add_image_extension(ext, &mapping.media_file.content_type);
             }
         }
 
         // Generate and add rels file if there are media files
-        if !media.is_empty() {
+        if !entry.media_files.is_empty() {
+            // Convert MediaFileMapping back to tuples for the rels generator
+            let media_tuples: Vec<(String, crate::template::extract::header_footer::MediaFile)> =
+                entry
+                    .media_files
+                    .iter()
+                    .map(|m| (m.original_rel_id.clone(), m.media_file.clone()))
+                    .collect();
             let rels_xml =
                 crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
-                    media, "header_",
+                    &media_tuples,
+                    "header_",
                 );
-            packager.add_header_rels(*header_num, &rels_xml)?;
+            packager.add_header_rels(entry.number, &rels_xml)?;
         }
     }
 
     // Add footers
-    for (footer_num, footer_bytes, media) in &build_result.footers {
-        packager.add_footer(*footer_num, footer_bytes)?;
+    for entry in &build_result.footers {
+        packager.add_footer(entry.number, &entry.xml_bytes)?;
 
         // Add media files for this footer (with header_ prefix)
-        for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() {
+        for mapping in &entry.media_files {
+            if !mapping.media_file.filename.is_empty() {
                 // Add header_ prefix to avoid conflicts with cover images
-                let prefixed_filename = format!("header_{}", media_file.filename);
+                let prefixed_filename = format!("header_{}", mapping.media_file.filename);
 
                 // Skip if already added
                 if added_media_files.contains(&prefixed_filename) {
@@ -618,7 +626,7 @@ pub fn markdown_to_docx_with_templates(
                 }
 
                 // Add the media file to the archive with prefixed name
-                packager.add_image(&prefixed_filename, &media_file.data)?;
+                packager.add_image(&prefixed_filename, &mapping.media_file.data)?;
                 added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
@@ -626,17 +634,25 @@ pub fn markdown_to_docx_with_templates(
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
-                content_types.add_image_extension(ext, &media_file.content_type);
+                content_types.add_image_extension(ext, &mapping.media_file.content_type);
             }
         }
 
         // Generate and add rels file if there are media files
-        if !media.is_empty() {
+        if !entry.media_files.is_empty() {
+            // Convert MediaFileMapping back to tuples for the rels generator
+            let media_tuples: Vec<(String, crate::template::extract::header_footer::MediaFile)> =
+                entry
+                    .media_files
+                    .iter()
+                    .map(|m| (m.original_rel_id.clone(), m.media_file.clone()))
+                    .collect();
             let rels_xml =
                 crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
-                    media, "header_",
+                    &media_tuples,
+                    "header_",
                 );
-            packager.add_footer_rels(*footer_num, &rels_xml)?;
+            packager.add_footer_rels(entry.number, &rels_xml)?;
         }
     }
 
@@ -644,31 +660,42 @@ pub fn markdown_to_docx_with_templates(
     Ok(cursor.into_inner())
 }
 
+/// Context for applying cover template to a document
+struct CoverTemplateContext<'a> {
+    /// The build result to modify
+    build_result: &'a mut crate::docx::builder::BuildResult,
+    /// Cover template data extracted from cover.docx
+    cover: &'a crate::template::extract::CoverTemplate,
+    /// Placeholder values for substitution
+    placeholder_ctx: &'a crate::template::PlaceholderContext,
+    /// Language for localization
+    lang: Language,
+    /// Relationship ID manager for resources
+    rel_manager: &'a mut crate::docx::rels_manager::RelIdManager,
+    /// Optional table template for formatting
+    table_template: Option<&'a crate::template::extract::TableTemplate>,
+    /// Optional image template for formatting
+    image_template: Option<&'a crate::template::extract::ImageTemplate>,
+    /// Document configuration
+    doc_config: &'a DocumentConfig,
+}
+
 /// Apply cover template to the document
 ///
 /// This function clones the raw XML from cover.docx, replaces placeholders,
 /// and inserts it directly into the document. This preserves all original
 /// formatting, positions, images, and relationships exactly as designed in Word.
-fn apply_cover_template(
-    build_result: &mut crate::docx::BuildResult,
-    cover: &crate::template::extract::CoverTemplate,
-    placeholder_ctx: &crate::template::PlaceholderContext,
-    lang: Language,
-    rel_manager: &mut crate::docx::RelIdManager,
-    table_template: Option<&crate::template::extract::TableTemplate>,
-    image_template: Option<&crate::template::extract::ImageTemplate>,
-    doc_config: &DocumentConfig,
-) -> Result<()> {
+fn apply_cover_template(ctx: CoverTemplateContext<'_>) -> Result<()> {
     use crate::template::placeholder::replace_placeholders;
 
     // If we have raw XML from the cover template, use it directly
-    if let Some(raw_xml) = &cover.raw_xml {
+    if let Some(raw_xml) = &ctx.cover.raw_xml {
         // Clone the raw XML
         let mut processed_xml = raw_xml.clone();
 
         // Handle {{inside}} placeholder specially - it needs markdown rendering
         // Render inside content to XML string
-        let inside_xml = if let Some(inside_md) = placeholder_ctx.get("inside") {
+        let inside_xml = if let Some(inside_md) = ctx.placeholder_ctx.get("inside") {
             // Parse the inside content as markdown
             let inside_parsed = parse_markdown_with_frontmatter(inside_md);
 
@@ -678,25 +705,25 @@ fn apply_cover_template(
                     enabled: false,
                     ..Default::default()
                 },
-                page: doc_config.page.clone(), // Pass page config to inside content
+                page: ctx.doc_config.page.clone(), // Pass page config to inside content
                 ..Default::default()
             };
             // Use the same rel_manager!
             let inside_result = build_document(
                 &inside_parsed,
-                lang,
+                ctx.lang,
                 &inside_config,
-                rel_manager,
-                table_template,
-                image_template,
-            );
+                ctx.rel_manager,
+                ctx.table_template,
+                ctx.image_template,
+            )?;
 
             // Merge resources from inside_result into main build_result
-            build_result
+            ctx.build_result
                 .images
                 .images
                 .extend(inside_result.images.images);
-            build_result
+            ctx.build_result
                 .hyperlinks
                 .hyperlinks
                 .extend(inside_result.hyperlinks.hyperlinks);
@@ -776,7 +803,7 @@ fn apply_cover_template(
         }
 
         // Replace other simple placeholders (like {{title}}, {{author}})
-        processed_xml = replace_placeholders(&processed_xml, placeholder_ctx);
+        processed_xml = replace_placeholders(&processed_xml, ctx.placeholder_ctx);
 
         // Fix image relationship IDs
         // Map old rId (from cover.docx) to new rId (in generated docx)
@@ -784,46 +811,45 @@ fn apply_cover_template(
             std::collections::HashSet::new();
 
         // Process all images from cover.elements (now includes SVG companion files)
-        for element in &cover.elements {
+        for element in &ctx.cover.elements {
             if let crate::template::extract::CoverElement::Image {
                 rel_id,
                 filename,
-                data,
+                data: Some(img_data),
                 width,
                 height,
                 ..
             } = element
             {
-                if let Some(img_data) = data {
-                    // Generate new relationship ID using RelIdManager
-                    let new_rel_id = rel_manager.get_mapped_id("cover", rel_id);
+                // Generate new relationship ID using RelIdManager
+                let new_rel_id = ctx.rel_manager.get_mapped_id("cover", rel_id);
 
-                    // Replace old ID with new ID in the XML
-                    processed_xml = processed_xml.replace(
-                        &format!("r:embed=\"{}\"", rel_id),
-                        &format!("r:embed=\"{}\"", new_rel_id),
-                    );
+                // Replace old ID with new ID in the XML
+                processed_xml = processed_xml.replace(
+                    &format!("r:embed=\"{}\"", rel_id),
+                    &format!("r:embed=\"{}\"", new_rel_id),
+                );
 
-                    // Check if image with this filename already exists to avoid duplicates
-                    let already_exists = processed_filenames.contains(filename)
-                        || build_result
-                            .images
-                            .images
-                            .iter()
-                            .any(|img| img.filename == *filename);
-                    if !already_exists {
-                        processed_filenames.insert(filename.clone());
-                        // Add image to build result
-                        let img_info = crate::docx::ImageInfo {
-                            filename: filename.clone(),
-                            rel_id: new_rel_id.clone(),
-                            src: filename.clone(),
-                            data: Some(img_data.clone()),
-                            width_emu: *width,
-                            height_emu: *height,
-                        };
-                        build_result.images.images.push(img_info);
-                    }
+                // Check if image with this filename already exists to avoid duplicates
+                let already_exists = processed_filenames.contains(filename)
+                    || ctx
+                        .build_result
+                        .images
+                        .images
+                        .iter()
+                        .any(|img| img.filename == *filename);
+                if !already_exists {
+                    processed_filenames.insert(filename.clone());
+                    // Add image to build result
+                    let img_info = crate::docx::builder::ImageInfo {
+                        filename: filename.clone(),
+                        rel_id: new_rel_id.clone(),
+                        src: filename.clone(),
+                        data: Some(img_data.clone()),
+                        width_emu: *width,
+                        height_emu: *height,
+                    };
+                    ctx.build_result.images.images.push(img_info);
                 }
             }
         }
@@ -834,7 +860,7 @@ fn apply_cover_template(
 
         // Add the processed raw XML as a DocElement
         // Insert at the beginning of the document
-        build_result
+        ctx.build_result
             .document
             .elements
             .insert(0, crate::docx::ooxml::DocElement::RawXml(processed_xml));
@@ -846,21 +872,22 @@ fn apply_cover_template(
             .suppress_header_footer();
 
         // Apply page layout from config
-        if let Some(ref page_config) = doc_config.page {
-            cover_section_break = cover_section_break.with_page_layout(
-                page_config.width,
-                page_config.height,
-                page_config.margin_top,
-                page_config.margin_right,
-                page_config.margin_bottom,
-                page_config.margin_left,
-                page_config.margin_header,
-                page_config.margin_footer,
-                page_config.margin_gutter,
-            );
+        if let Some(ref page_config) = ctx.doc_config.page {
+            let layout = crate::docx::ooxml::PageLayout {
+                width: page_config.width,
+                height: page_config.height,
+                margin_top: page_config.margin_top,
+                margin_right: page_config.margin_right,
+                margin_bottom: page_config.margin_bottom,
+                margin_left: page_config.margin_left,
+                margin_header: page_config.margin_header,
+                margin_footer: page_config.margin_footer,
+                margin_gutter: page_config.margin_gutter,
+            };
+            cover_section_break = cover_section_break.with_page_layout(layout);
         }
 
-        build_result.document.elements.insert(
+        ctx.build_result.document.elements.insert(
             1,
             crate::docx::ooxml::DocElement::Paragraph(Box::new(cover_section_break)),
         );
@@ -878,34 +905,29 @@ fn strip_section_properties(xml: &str) -> String {
 
     // Remove <w:sectPr>...</w:sectPr> elements
     // Handle both self-closing and content forms
-    loop {
-        // Find the start of a sectPr element
-        if let Some(start) = result.find("<w:sectPr") {
-            // Find the end of this element
-            // It could be self-closing: <w:sectPr ... /> or have content: <w:sectPr ...>...</w:sectPr>
-            let after_start = &result[start..];
+    while let Some(start) = result.find("<w:sectPr") {
+        // Find the end of this element
+        // It could be self-closing: <w:sectPr ... /> or have content: <w:sectPr ...>...</w:sectPr>
+        let after_start = &result[start..];
 
-            // Check if it's self-closing
-            if let Some(self_close) = after_start.find("/>") {
-                let open_end = after_start.find('>').unwrap_or(self_close);
-                if self_close == open_end - 1 {
-                    // It's self-closing: <w:sectPr ... />
-                    result.replace_range(start..start + self_close + 2, "");
-                    continue;
-                }
-            }
-
-            // It's a container element, find the closing tag
-            if let Some(end) = result[start..].find("</w:sectPr>") {
-                result.replace_range(start..start + end + 11, "");
+        // Check if it's self-closing
+        if let Some(self_close) = after_start.find("/>") {
+            let open_end = after_start.find('>').unwrap_or(self_close);
+            if self_close == open_end - 1 {
+                // It's self-closing: <w:sectPr ... />
+                result.replace_range(start..start + self_close + 2, "");
                 continue;
             }
-
-            // If we can't find the end, break to avoid infinite loop
-            break;
-        } else {
-            break;
         }
+
+        // It's a container element, find the closing tag
+        if let Some(end) = result[start..].find("</w:sectPr>") {
+            result.replace_range(start..start + end + 11, "");
+            continue;
+        }
+
+        // If we can't find the end, break to avoid infinite loop
+        break;
     }
 
     result
@@ -1009,10 +1031,10 @@ pub fn markdown_to_docx_with_includes(
         &parsed,
         lang,
         &DocumentConfig::default(),
-        &mut crate::docx::RelIdManager::new(),
+        &mut crate::docx::rels_manager::RelIdManager::new(),
         None,
         None,
-    );
+    )?;
 
     // Insert TOC if enabled
     if let Some(toc_builder) = build_result.toc_builder.take() {
@@ -1094,18 +1116,18 @@ pub fn markdown_to_docx_with_includes(
 
     // Process headers and capture returned relationship IDs
     let mut header_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (header_num, _, _) in &build_result.headers {
-        content_types.add_header(*header_num);
-        let rel_id = doc_rels.add_header(*header_num);
-        header_rel_ids.push((*header_num, rel_id));
+    for entry in &build_result.headers {
+        content_types.add_header(entry.number);
+        let rel_id = doc_rels.add_header(entry.number);
+        header_rel_ids.push((entry.number, rel_id));
     }
 
     // Process footers and capture returned relationship IDs
     let mut footer_rel_ids: Vec<(u32, String)> = Vec::new();
-    for (footer_num, _, _) in &build_result.footers {
-        content_types.add_footer(*footer_num);
-        let rel_id = doc_rels.add_footer(*footer_num);
-        footer_rel_ids.push((*footer_num, rel_id));
+    for entry in &build_result.footers {
+        content_types.add_footer(entry.number);
+        let rel_id = doc_rels.add_footer(entry.number);
+        footer_rel_ids.push((entry.number, rel_id));
     }
 
     // Update header/footer refs with actual relationship IDs from doc_rels
@@ -1145,14 +1167,14 @@ pub fn markdown_to_docx_with_includes(
     let mut added_media_files: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Add headers to the archive
-    for (header_num, header_bytes, media) in &build_result.headers {
-        packager.add_header(*header_num, header_bytes)?;
+    for entry in &build_result.headers {
+        packager.add_header(entry.number, &entry.xml_bytes)?;
 
         // Add media files for this header (with header_ prefix)
-        for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() {
+        for mapping in &entry.media_files {
+            if !mapping.media_file.filename.is_empty() {
                 // Add header_ prefix to avoid conflicts with cover images
-                let prefixed_filename = format!("header_{}", media_file.filename);
+                let prefixed_filename = format!("header_{}", mapping.media_file.filename);
 
                 // Skip if already added
                 if added_media_files.contains(&prefixed_filename) {
@@ -1160,7 +1182,7 @@ pub fn markdown_to_docx_with_includes(
                 }
 
                 // Add the media file to the archive with prefixed name
-                packager.add_image(&prefixed_filename, &media_file.data)?;
+                packager.add_image(&prefixed_filename, &mapping.media_file.data)?;
                 added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
@@ -1168,29 +1190,37 @@ pub fn markdown_to_docx_with_includes(
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
-                content_types.add_image_extension(ext, &media_file.content_type);
+                content_types.add_image_extension(ext, &mapping.media_file.content_type);
             }
         }
 
         // Generate and add rels file if there are media files
-        if !media.is_empty() {
+        if !entry.media_files.is_empty() {
+            // Convert MediaFileMapping back to tuples for the rels generator
+            let media_tuples: Vec<(String, crate::template::extract::header_footer::MediaFile)> =
+                entry
+                    .media_files
+                    .iter()
+                    .map(|m| (m.original_rel_id.clone(), m.media_file.clone()))
+                    .collect();
             let rels_xml =
                 crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
-                    media, "header_",
+                    &media_tuples,
+                    "header_",
                 );
-            packager.add_header_rels(*header_num, &rels_xml)?;
+            packager.add_header_rels(entry.number, &rels_xml)?;
         }
     }
 
     // Add footers to the archive
-    for (footer_num, footer_bytes, media) in &build_result.footers {
-        packager.add_footer(*footer_num, footer_bytes)?;
+    for entry in &build_result.footers {
+        packager.add_footer(entry.number, &entry.xml_bytes)?;
 
         // Add media files for this footer (with header_ prefix)
-        for (_r_id, media_file) in media {
-            if !media_file.filename.is_empty() {
+        for mapping in &entry.media_files {
+            if !mapping.media_file.filename.is_empty() {
                 // Add header_ prefix to avoid conflicts with cover images
-                let prefixed_filename = format!("header_{}", media_file.filename);
+                let prefixed_filename = format!("header_{}", mapping.media_file.filename);
 
                 // Skip if already added
                 if added_media_files.contains(&prefixed_filename) {
@@ -1198,7 +1228,7 @@ pub fn markdown_to_docx_with_includes(
                 }
 
                 // Add the media file to the archive with prefixed name
-                packager.add_image(&prefixed_filename, &media_file.data)?;
+                packager.add_image(&prefixed_filename, &mapping.media_file.data)?;
                 added_media_files.insert(prefixed_filename.clone());
 
                 // Add to content types
@@ -1206,17 +1236,25 @@ pub fn markdown_to_docx_with_includes(
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("png");
-                content_types.add_image_extension(ext, &media_file.content_type);
+                content_types.add_image_extension(ext, &mapping.media_file.content_type);
             }
         }
 
         // Generate and add rels file if there are media files
-        if !media.is_empty() {
+        if !entry.media_files.is_empty() {
+            // Convert MediaFileMapping back to tuples for the rels generator
+            let media_tuples: Vec<(String, crate::template::extract::header_footer::MediaFile)> =
+                entry
+                    .media_files
+                    .iter()
+                    .map(|m| (m.original_rel_id.clone(), m.media_file.clone()))
+                    .collect();
             let rels_xml =
                 crate::template::render::header_footer::generate_header_footer_rels_xml_with_prefix(
-                    media, "header_",
+                    &media_tuples,
+                    "header_",
                 );
-            packager.add_footer_rels(*footer_num, &rels_xml)?;
+            packager.add_footer_rels(entry.number, &rels_xml)?;
         }
     }
 
@@ -1512,7 +1550,7 @@ mod tests {
         };
 
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let build_result = build_document(
             &parsed,
             Language::English,
@@ -1520,7 +1558,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Verify headers and footers were generated
         assert!(
@@ -1564,12 +1603,12 @@ mod tests {
             .unwrap();
 
         // Add headers and footers
-        for (header_num, header_bytes, _) in &build_result.headers {
-            packager.add_header(*header_num, header_bytes).unwrap();
+        for entry in &build_result.headers {
+            packager.add_header(entry.number, &entry.xml_bytes).unwrap();
         }
 
-        for (footer_num, footer_bytes, _) in &build_result.footers {
-            packager.add_footer(*footer_num, footer_bytes).unwrap();
+        for entry in &build_result.footers {
+            packager.add_footer(entry.number, &entry.xml_bytes).unwrap();
         }
 
         let cursor = packager.finish().unwrap();
@@ -1612,7 +1651,7 @@ mod tests {
         // The default config should generate headers and footers
         // We can verify this by checking that the build result includes them
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let build_result = build_document(
             &parsed,
             Language::English,
@@ -1620,7 +1659,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Default config has headers and footers
         assert!(

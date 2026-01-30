@@ -11,11 +11,9 @@
 
 use md2docx::config::ProjectConfig;
 use md2docx::discovery::DiscoveredProject;
-use md2docx::docx::ooxml::{FooterConfig, HeaderConfig, HeaderFooterField};
-use md2docx::docx::TocConfig;
 use md2docx::{
-    markdown_to_docx_with_templates, DocumentConfig, DocumentMeta, Language, PlaceholderContext,
-    TemplateDir,
+    markdown_to_docx_with_templates, DocumentConfig, DocumentMeta, FooterConfig, HeaderConfig,
+    HeaderFooterField, Language, PlaceholderContext, TemplateDir, TocConfig,
 };
 use std::fs;
 use std::path::Path;
@@ -185,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Map FontsSection to FontConfig
     // Note: Font sizes are in half-points (multiply pt by 2 for OOXML)
-    let font_config = Some(md2docx::docx::ooxml::FontConfig {
+    let font_config = Some(md2docx::docx::FontConfig {
         default: if project_config.fonts.default.is_empty() {
             None
         } else {

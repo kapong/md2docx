@@ -24,7 +24,7 @@ impl Default for TocConfig {
 
 /// A collected heading for TOC
 #[derive(Debug, Clone)]
-pub struct TocEntry {
+pub(crate) struct TocEntry {
     pub text: String,        // Heading text
     pub level: u8,           // 1-6
     pub bookmark_id: String, // Bookmark name for linking (e.g., "_Toc1_Introduction")
@@ -32,7 +32,7 @@ pub struct TocEntry {
 
 /// Collects headings during document build and generates TOC
 #[derive(Debug, Default)]
-pub struct TocBuilder {
+pub(crate) struct TocBuilder {
     entries: Vec<TocEntry>,
     next_id: u32,
 }
@@ -64,6 +64,7 @@ impl TocBuilder {
     }
 
     /// Get all collected entries
+    #[allow(dead_code)]
     pub fn entries(&self) -> &[TocEntry] {
         &self.entries
     }
@@ -88,7 +89,7 @@ impl TocBuilder {
 
     /// Generate TOC as document elements
     /// Returns paragraphs for: TOC title + TOC field with page numbers + section break
-    pub fn generate_toc(&self, config: &TocConfig) -> Vec<DocElement> {
+    pub(crate) fn generate_toc(&self, config: &TocConfig) -> Vec<DocElement> {
         if !config.enabled || self.entries.is_empty() {
             return vec![];
         }

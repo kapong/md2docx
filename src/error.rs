@@ -45,6 +45,18 @@ pub enum Error {
     #[error("Include error: {0}")]
     Include(String),
 
+    /// Regex compilation error
+    #[error("Regex error: {0}")]
+    Regex(String),
+
+    /// UTF-8 conversion error
+    #[error("UTF-8 error: {0}")]
+    Utf8(String),
+
+    /// Template parsing error
+    #[error("Template parse error: {0}")]
+    TemplateParse(String),
+
     /// Feature not implemented yet
     #[error("Not implemented: {0}")]
     NotImplemented(String),
@@ -64,5 +76,19 @@ impl From<zip::result::ZipError> for Error {
 impl From<quick_xml::Error> for Error {
     fn from(err: quick_xml::Error) -> Self {
         Error::Xml(err.to_string())
+    }
+}
+
+// Implement From for regex::Error
+impl From<regex::Error> for Error {
+    fn from(err: regex::Error) -> Self {
+        Error::Regex(err.to_string())
+    }
+}
+
+// Implement From for std::string::FromUtf8Error
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(err: std::string::FromUtf8Error) -> Self {
+        Error::Utf8(err.to_string())
     }
 }

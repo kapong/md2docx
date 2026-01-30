@@ -5,19 +5,22 @@
 ### 1. Code Review & Refactoring (High Priority)
 
 #### Error Handling Improvements
-- [ ] Replace remaining `unwrap()` calls with proper error handling using `?` or `expect()` with descriptive messages
-- [ ] Review error types in `src/error.rs` and ensure comprehensive error coverage
+- [x] Replace remaining `unwrap()` calls with proper error handling using `?` or `expect()` with descriptive messages
+  - Status: Completed - mermaid/mod.rs regex unwraps converted to `once_cell::sync::Lazy` static regexes
+- [x] Review error types in `src/error.rs` and ensure comprehensive error coverage
 - [ ] Add context to errors where appropriate using `anyhow` or similar
 
 #### Code Quality (Address Clippy Warnings)
-- [ ] Simplify complex types in `src/docx/builder.rs` (headers/footers Vec types)
-- [ ] Refactor functions with too many arguments:
-  - `BuildContext::new()` (15 args)
-  - `create_table_cell_with_template()` (8 args)
-  - `Paragraph::with_page_layout()` (10 args)
-  - `apply_cover_template()` (8 args)
-- [ ] Collapse nested `if let` statements where possible
-- [ ] Convert loops to `while let` where appropriate
+- [x] Simplify complex types in `src/docx/builder.rs` (headers/footers Vec types)
+  - Created `HeaderFooterEntry` and `MediaFileMapping` structs to replace complex tuple types
+- [x] Refactor functions with too many arguments:
+  - [x] `BuildContext::new()` (15 args)
+  - [x] `create_table_cell_with_template()` (8 args)
+  - [x] `Paragraph::with_page_layout()` (10 args)
+  - [x] `apply_cover_template()` (8 args) - Created `CoverTemplateContext` struct
+- [x] Collapse nested `if let` statements where possible
+  - Refactored 3 locations in builder.rs using `Option::and_then`
+- [ ] Convert loops to `while let` where appropriate (low priority - current loops are idiomatic)
 
 #### Documentation
 - [ ] Add missing doc comments to public APIs
@@ -25,11 +28,20 @@
 - [ ] Review and update module-level documentation
 
 #### Code Organization
-- [ ] Review module visibility (pub vs pub(crate) vs private)
-- [ ] Check for code duplication and extract common functionality
+- [x] Review module visibility (pub vs pub(crate) vs private)
+  - Made internal types `pub(crate)`: ImageContext, HyperlinkContext, NumberingContext, BuildResult, BuildContext, etc.
+  - OOXML types now properly encapsulated (HeaderFooterRefs, BookmarkStart, DocumentXml, etc.)
+  - Template extraction types visibility cleaned up
+- [x] Check for code duplication and extract common functionality
+  - Created `src/template/extract/xml_utils.rs` with shared utilities
+  - Extracted `extract_attribute()` function (was 3 copies)
+  - Extracted `extract_run_properties()` with configurable defaults (was 3 copies)
+  - ~100+ lines of duplicate code removed
 - [ ] Ensure consistent naming conventions
 
-### 2. Docker Setup (High Priority)
+### 2. Docker Setup (High Priority) - **Antigravity Mission**
+
+> **Note**: This task is handled by Antigravity, not OpenCode.
 
 #### Dockerfile (Ultimate: Alpine for minimal size)
 ```dockerfile
@@ -217,23 +229,100 @@ examples/**/output/
   - `chore:` - Maintenance
 
 #### Security & Cleanup
-- [ ] Scan for sensitive data:
-  - Hardcoded paths (check for `/Users/kapong/`)
-  - API keys or tokens
-  - Personal information
-- [ ] Update .gitignore:
-  - Add `*.docx` to ignore generated files
-  - Add `output/` directories
-  - Add temp files (`~$*.docx`)
+- [x] Scan for sensitive data:
+  - [x] Hardcoded paths (check for `/Users/kapong/`) - Fixed 2 test files to use `env!("CARGO_MANIFEST_DIR")`
+  - [x] API keys or tokens - None found
+  - [x] Personal information - None found (test emails use example.com)
+- [x] Update .gitignore:
+  - [x] `*.docx` already present, added exception for template files
+  - [x] `output/` directories already present
+  - [x] `~$*.docx` temp files already present
+  - [x] Added `plan.md` exclusion for public release
 - [ ] Clean working directory
 
 #### Release Preparation
-- [ ] Create `LICENSE` file (MIT or Apache-2.0)
-- [ ] Create `CHANGELOG.md` with version history
-- [ ] Create `CONTRIBUTING.md` with guidelines
+- [x] Create `LICENSE` file (MIT) - Already exists
+- [x] Create `CHANGELOG.md` with version history
+- [x] Create `CONTRIBUTING.md` with guidelines
 - [ ] Tag initial release: `git tag -a v0.1.0 -m "Initial release"`
 
-### 4. Documentation Updates (Medium Priority)
+### 4. CI/CD Pipeline (GitHub Actions)
+
+#### Workflow: Build and Push Docker Image (`.github/workflows/docker-publish.yml`)
+```yaml
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+    # Publish semver tags as releases.
+    tags: [ "v*.*.*" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # This is used to complete the identity challenge
+      # with sigstore/fulcio when running outside of PRs.
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Set up Buildx for multi-platform builds (if needed in future)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Login to GHCR
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract metadata (tags, labels) for Docker
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,format=long
+
+      # Build and push Docker image
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+```
+
+#### Tasks
+- [ ] Create `.github/workflows/docker-publish.yml`
+- [ ] Configure repository permissions (Package settings: Allow write access)
+- [ ] Test workflow with a push to main
+- [ ] Verify image exists in GitHub Package Registry (GHCR)
+
+### 5. Documentation Updates (Medium Priority)
 
 #### README.md Updates
 - [ ] Add Docker usage section

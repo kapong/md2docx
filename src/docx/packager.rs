@@ -13,20 +13,20 @@ use crate::error::Result;
 /// DOCX Packager
 ///
 /// Assembles all OOXML components into a valid DOCX (ZIP) file.
-pub struct Packager<W: Write + Seek> {
+pub(crate) struct Packager<W: Write + Seek> {
     writer: ZipWriter<W>,
 }
 
 /// Custom document properties for packaging
-pub struct DocProps<'a> {
+pub(crate) struct DocProps<'a> {
     pub core: &'a CoreProperties,
     pub app: &'a AppProperties,
 }
 
 /// Relationships context for packaging
-pub struct RelContext<'a> {
-    pub root: &'a Relationships,
-    pub doc: &'a Relationships,
+pub(crate) struct RelContext<'a> {
+    pub(crate) root: &'a Relationships,
+    pub(crate) doc: &'a Relationships,
 }
 
 impl<W: Write + Seek> Packager<W> {
@@ -56,7 +56,7 @@ impl<W: Write + Seek> Packager<W> {
     /// - `word/settings.xml`
     /// - `word/fontTable.xml`
     /// - `word/_rels/document.xml.rels`
-    pub fn package(
+    pub(crate) fn package(
         &mut self,
         document: &DocumentXml,
         styles: &StylesDocument,
@@ -85,7 +85,7 @@ impl<W: Write + Seek> Packager<W> {
     }
 
     /// Package all DOCX components with custom document properties
-    pub fn package_with_props(
+    pub(crate) fn package_with_props(
         &mut self,
         document: &DocumentXml,
         styles: &StylesDocument,

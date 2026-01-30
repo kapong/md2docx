@@ -3,6 +3,7 @@
 //! Extracts cover page design elements from a DOCX file created in Microsoft Word.
 //! The cover page can contain shapes, images, text boxes with placeholders.
 
+use super::{extract_attribute, extract_run_properties, RunPropertiesDefaults};
 use crate::error::{Error, Result};
 use std::io::Read;
 use std::path::Path;
@@ -274,7 +275,8 @@ pub fn extract(path: &Path) -> Result<CoverTemplate> {
 
     // Also extract any additional images referenced in the XML (e.g., SVG companion files)
     // Scan for all r:embed references and extract any that weren't already extracted
-    let embed_pattern = regex::Regex::new(r#"r:embed="(rId\d+)""#).unwrap();
+    let embed_pattern =
+        regex::Regex::new(r#"r:embed="(rId\d+)""#).expect("embed_pattern regex should be valid");
     let embed_matches: Vec<String> = embed_pattern
         .find_iter(&cover_xml)
         .map(|m| {
@@ -481,24 +483,6 @@ fn parse_page_properties(document_xml: &str) -> (u32, u32, PageMargins) {
     (width, height, margins)
 }
 
-/// Extract attribute value from XML element
-fn extract_attribute(xml: &str, attr_name: &str) -> Option<String> {
-    if let Some(pos) = xml.find(attr_name) {
-        let start = pos + attr_name.len();
-        let rest = &xml[start..];
-
-        // Find the opening quote
-        if let Some(quote_pos) = rest.find('"') {
-            let after_quote = &rest[quote_pos + 1..];
-            // Find the closing quote
-            if let Some(end_quote) = after_quote.find('"') {
-                return Some(after_quote[..end_quote].to_string());
-            }
-        }
-    }
-    None
-}
-
 /// Extract background color from document XML
 fn extract_background_color(document_xml: &str) -> Option<String> {
     // Look for document background
@@ -605,42 +589,31 @@ fn parse_paragraph_element(p_xml: &str) -> Result<Option<CoverElement>> {
     }))
 }
 
-/// Parse run properties (formatting)
+/// Parse run properties (formatting) using shared utility
 fn parse_run_properties(xml: &str) -> (String, u32, String, bool, bool) {
-    let mut font_family = "TH Sarabun New".to_string();
-    let mut font_size = 24u32; // 12pt default
-    let mut color = "#000000".to_string();
-    let mut bold = false;
-    let mut italic = false;
-
-    // Check for bold
-    if xml.contains("<w:b/>") || xml.contains("<w:b ") {
-        bold = true;
-    }
-
-    // Check for italic
-    if xml.contains("<w:i/>") || xml.contains("<w:i ") {
-        italic = true;
-    }
-
-    // Extract font size
-    if let Some(sz) = extract_attribute(xml, "<w:sz w:val=") {
-        if let Ok(size) = sz.parse::<u32>() {
-            font_size = size;
+    // Use the shared function with Thai defaults
+    if let Some(rpr_start) = xml.find("<w:rPr") {
+        if let Some(rpr_end) = xml[rpr_start..].find("</w:rPr>") {
+            let rpr_xml = &xml[rpr_start..rpr_start + rpr_end + 8];
+            let props = extract_run_properties(rpr_xml, &RunPropertiesDefaults::thai());
+            return (
+                props.font_family,
+                props.font_size,
+                props.font_color,
+                props.bold,
+                props.italic,
+            );
         }
     }
-
-    // Extract color
-    if let Some(color_attr) = extract_attribute(xml, "<w:color w:val=") {
-        color = format!("#{}", color_attr);
-    }
-
-    // Extract font family
-    if let Some(fonts_attr) = extract_attribute(xml, "w:ascii=") {
-        font_family = fonts_attr;
-    }
-
-    (font_family, font_size, color, bold, italic)
+    // Return Thai defaults if no rPr found
+    let defaults = RunPropertiesDefaults::thai();
+    (
+        defaults.font_family.to_string(),
+        defaults.font_size,
+        defaults.font_color.to_string(),
+        false,
+        false,
+    )
 }
 
 /// Parse paragraph alignment

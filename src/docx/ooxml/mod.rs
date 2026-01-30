@@ -6,18 +6,30 @@ mod footer;
 mod footnotes;
 mod header;
 mod latent_styles;
-mod numbering;
+pub(crate) mod numbering;
 mod rels;
 mod styles;
 
-pub use content_types::*;
-pub use doc_props::*;
-pub use document::*;
-pub use endnotes::*;
-pub use footer::*;
-pub use footnotes::*;
-pub use header::*;
-pub use latent_styles::*;
-pub use numbering::*;
-pub use rels::*;
-pub use styles::*;
+// Re-export types for internal use within the crate
+pub(crate) use content_types::ContentTypes;
+pub(crate) use doc_props::*;
+pub(crate) use document::{
+    DocElement, DocumentXml, HeaderFooterRefs, Hyperlink, ImageBorderEffect, ImageEffectExtent,
+    ImageElement, ImageShadowEffect, PageLayout, ParagraphChild, Table, TableCellElement, TableRow,
+    TableWidth,
+};
+pub(crate) use endnotes::*;
+pub(crate) use footer::*;
+pub(crate) use header::*;
+pub(crate) use rels::Relationships;
+pub(crate) use styles::{
+    generate_font_table_xml, generate_settings_xml, generate_theme_xml, generate_web_settings_xml,
+    StylesDocument,
+};
+
+// Public API exports
+pub use document::{Paragraph, Run};
+pub use footer::FooterConfig;
+pub use footnotes::FootnotesXml;
+pub use header::{HeaderConfig, HeaderFooterField};
+pub use styles::{FontConfig, Language};

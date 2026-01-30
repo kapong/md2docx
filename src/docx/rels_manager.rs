@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 /// This ensures all relationships in `word/_rels/document.xml.rels` have unique IDs,
 /// even when combining content from multiple sources (main document, cover template, etc.).
 #[derive(Debug, Clone)]
-pub struct RelIdManager {
+pub(crate) struct RelIdManager {
     next_id: usize,
     reserved_ids: HashSet<String>,
     // Mapping from (scope, original_id) -> new_id
@@ -80,6 +80,7 @@ impl RelIdManager {
     }
 
     /// Reset the manager (clearing mappings but keeping reserved IDs)
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.mappings.clear();
         // We don't reset next_id or reserved_ids to ensure safety if reused?

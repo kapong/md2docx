@@ -5,8 +5,9 @@ use std::collections::HashMap;
 
 /// Information about a registered anchor/bookmark
 #[derive(Debug, Clone)]
-pub struct AnchorInfo {
-    pub id: String,             // User-defined ID (e.g., "intro", "arch")
+pub(crate) struct AnchorInfo {
+    #[allow(dead_code)]
+    pub id: String, // User-defined ID (e.g., "intro", "arch")
     pub bookmark_name: String,  // OOXML bookmark name (e.g., "_Ref_intro")
     pub ref_type: RefType,      // Chapter, Figure, Table, etc.
     pub display_text: String,   // Text shown when referenced (e.g., "Introduction")
@@ -15,7 +16,7 @@ pub struct AnchorInfo {
 
 /// Context for tracking cross-references during document build
 #[derive(Debug, Default)]
-pub struct CrossRefContext {
+pub(crate) struct CrossRefContext {
     /// Map from anchor ID to anchor info
     anchors: HashMap<String, AnchorInfo>,
     /// Counter for generating unique bookmark IDs
@@ -114,6 +115,7 @@ impl CrossRefContext {
     }
 
     /// Register a generic anchor (for future extensibility)
+    #[allow(dead_code)]
     pub fn register_anchor(&mut self, id: &str, ref_type: RefType, text: &str) -> String {
         self.next_bookmark_id += 1;
         let bookmark_name = format!("_Ref_{}", sanitize_bookmark_name(id));
@@ -140,6 +142,7 @@ impl CrossRefContext {
 
     /// Get display text for a reference
     /// Returns formatted text like "Figure 1.2" or just the title
+    #[allow(dead_code)]
     pub fn get_display_text(&self, target: &str, _ref_type: RefType) -> String {
         self.get_localized_display_text(target, crate::docx::ooxml::Language::English)
     }
@@ -196,11 +199,13 @@ impl CrossRefContext {
     }
 
     /// Check if an anchor exists
+    #[allow(dead_code)]
     pub fn has_anchor(&self, id: &str) -> bool {
         self.anchors.contains_key(id)
     }
 
     /// Get all registered anchors (for debugging/testing)
+    #[allow(dead_code)]
     pub fn anchors(&self) -> &HashMap<String, AnchorInfo> {
         &self.anchors
     }

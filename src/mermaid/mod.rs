@@ -7,11 +7,31 @@ pub mod config;
 pub use config::MermaidConfig;
 
 use crate::error::Error;
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 /// Padding factor for SVG canvas (1.15 = 15% extra space)
 const SVG_PADDING_FACTOR: f64 = 1.15;
 
 use std::panic;
+
+/// Static regex for pipe-separated edge labels: -->|label| or --|label|->, etc.
+static PIPE_LABEL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(-{1,2}?=?>?|->?|\.-\.)\|[^|]+\|"#).expect("pipe label regex is valid")
+});
+
+/// Static regex for bracket edge labels: -->[label] or --> [label]
+static BRACKET_LABEL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(-{1,2}?=?>?|->?)\s*\[([^\]]+)\]"#).expect("bracket label regex is valid")
+});
+
+/// Static regex for extracting SVG width attribute
+static WIDTH_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"width="([^"]+)""#).expect("width regex is valid"));
+
+/// Static regex for extracting SVG height attribute
+static HEIGHT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"height="([^"]+)""#).expect("height regex is valid"));
 
 /// Render mermaid diagram to SVG string with text converted to paths
 ///
@@ -102,20 +122,11 @@ fn try_render_to_svg(content: &str) -> Result<String, Error> {
 /// # Returns
 /// Simplified mermaid code without edge labels
 fn strip_edge_labels(content: &str) -> String {
-    use regex::Regex;
-
-    // Pattern 1: Pipe-separated labels: -->|label| or --|label|->, etc.
-    let pipe_label_re = Regex::new(r#"(-{1,2}?=?>?|->?|\.-\.)\|[^|]+\|"#).unwrap();
-
-    // Pattern 2: Bracket labels: -->[label] or --> [label]
-    // The \s* matches optional space between arrow and bracket
-    let bracket_label_re = Regex::new(r#"(-{1,2}?=?>?|->?)\s*\[([^\]]+)\]"#).unwrap();
-
     // Replace pipe labels with simple arrow
-    let result = pipe_label_re.replace_all(content, "$1");
+    let result = PIPE_LABEL_RE.replace_all(content, "$1");
 
     // Replace bracket labels with simple arrow
-    let result = bracket_label_re.replace_all(&result, "$1");
+    let result = BRACKET_LABEL_RE.replace_all(&result, "$1");
 
     result.to_string()
 }
@@ -158,20 +169,22 @@ fn convert_text_to_paths(svg: &str) -> Result<String, Error> {
 /// This increases the width and height attributes while keeping the viewBox,
 /// effectively adding margin around the diagram content.
 fn add_canvas_padding(svg: &str) -> Result<String, Error> {
-    // Parse the SVG to extract current dimensions
-    let width_re = regex::Regex::new(r#"width="([^"]+)""#).unwrap();
-    let height_re = regex::Regex::new(r#"height="([^"]+)""#).unwrap();
-
     // Extract current dimensions
-    let width_caps = width_re
+    let width_caps = WIDTH_RE
         .captures(svg)
         .ok_or_else(|| Error::Mermaid("No width attribute found".to_string()))?;
-    let height_caps = height_re
+    let height_caps = HEIGHT_RE
         .captures(svg)
         .ok_or_else(|| Error::Mermaid("No height attribute found".to_string()))?;
 
-    let width_str = width_caps.get(1).unwrap().as_str();
-    let height_str = height_caps.get(1).unwrap().as_str();
+    let width_str = width_caps
+        .get(1)
+        .expect("width regex capture group 1 must exist")
+        .as_str();
+    let height_str = height_caps
+        .get(1)
+        .expect("height regex capture group 1 must exist")
+        .as_str();
 
     // Parse dimensions (handle units like "px", "pt", or unitless)
     let width: f64 = parse_dimension(width_str)?;
@@ -185,8 +198,8 @@ fn add_canvas_padding(svg: &str) -> Result<String, Error> {
     let new_width_attr = format!(r#"width="{}""#, format_dimension(new_width, width_str));
     let new_height_attr = format!(r#"height="{}""#, format_dimension(new_height, height_str));
 
-    let result = width_re.replace(svg, new_width_attr.as_str());
-    let result = height_re.replace(&result, new_height_attr.as_str());
+    let result = WIDTH_RE.replace(svg, new_width_attr.as_str());
+    let result = HEIGHT_RE.replace(&result, new_height_attr.as_str());
 
     Ok(result.to_string())
 }

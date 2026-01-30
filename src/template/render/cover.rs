@@ -20,7 +20,7 @@ use crate::template::placeholder::{replace_placeholders, PlaceholderContext};
 /// * `ctx` - The placeholder context with replacement values
 ///
 /// # Example
-/// ```rust,no_run
+/// ```rust,ignore
 /// use md2docx::docx::ooxml::DocumentXml;
 /// use md2docx::template::extract::CoverTemplate;
 /// use md2docx::template::placeholder::PlaceholderContext;
@@ -32,7 +32,8 @@ use crate::template::placeholder::{replace_placeholders, PlaceholderContext};
 ///
 /// render_cover(&mut doc_xml, &template, &ctx).unwrap();
 /// ```
-pub fn render_cover(
+#[allow(dead_code)]
+pub(crate) fn render_cover(
     doc_xml: &mut DocumentXml,
     template: &CoverTemplate,
     ctx: &PlaceholderContext,

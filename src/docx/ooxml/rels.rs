@@ -16,7 +16,7 @@ pub struct Relationship {
 }
 
 /// Relationships container
-pub struct Relationships {
+pub(crate) struct Relationships {
     rels: Vec<Relationship>,
     next_id: usize,
 }
@@ -134,6 +134,7 @@ impl Relationships {
     }
 
     /// Add external hyperlink
+    #[allow(dead_code)]
     pub fn add_hyperlink(&mut self, url: &str) -> String {
         let id = format!("rId{}", self.next_id);
         self.add(Relationship {
@@ -160,6 +161,7 @@ impl Relationships {
     }
 
     /// Add image with auto-generated ID
+    #[allow(dead_code)]
     pub fn add_image(&mut self, filename: &str) -> String {
         let id = format!("rId{}", self.next_id);
         self.add(Relationship {

@@ -173,12 +173,19 @@ pub fn replace_placeholders(content: &str, ctx: &PlaceholderContext) -> String {
     let mut result = content.to_string();
 
     // Find all placeholders {{key}}
-    let placeholder_regex = regex::Regex::new(r"\{\{(\w+)\}\}").unwrap();
+    let placeholder_regex =
+        regex::Regex::new(r"\{\{(\w+)\}\}").expect("placeholder_regex should be valid");
 
     // Replace each placeholder
     for cap in placeholder_regex.captures_iter(content) {
-        let full_match = cap.get(0).unwrap().as_str();
-        let key = cap.get(1).unwrap().as_str();
+        let full_match = cap
+            .get(0)
+            .expect("placeholder_regex should have capture group 0")
+            .as_str();
+        let key = cap
+            .get(1)
+            .expect("placeholder_regex should have capture group 1")
+            .as_str();
 
         if let Some(value) = ctx.get(key) {
             result = result.replace(full_match, value);
@@ -225,10 +232,15 @@ pub fn has_placeholders(content: &str) -> bool {
 /// ```
 pub fn extract_placeholders(content: &str) -> Vec<String> {
     let mut keys = Vec::new();
-    let placeholder_regex = regex::Regex::new(r"\{\{(\w+)\}\}").unwrap();
+    let placeholder_regex =
+        regex::Regex::new(r"\{\{(\w+)\}\}").expect("placeholder_regex should be valid");
 
     for cap in placeholder_regex.captures_iter(content) {
-        let key = cap.get(1).unwrap().as_str().to_string();
+        let key = cap
+            .get(1)
+            .expect("placeholder_regex should have capture group 1")
+            .as_str()
+            .to_string();
         if !keys.contains(&key) {
             keys.push(key);
         }

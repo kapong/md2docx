@@ -342,7 +342,7 @@ impl ProjectBuilder {
 
         DocumentConfig {
             title: self.config.document.title.clone(),
-            toc: crate::docx::TocConfig {
+            toc: crate::docx::toc::TocConfig {
                 enabled: toc_enabled,
                 depth: self.config.toc.depth,
                 title: self.config.toc.title.clone(),

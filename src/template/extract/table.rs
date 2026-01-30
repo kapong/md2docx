@@ -7,6 +7,7 @@
 //! - Row 3: Even row style
 //! - Row 4+: First column style example
 
+use super::{extract_attribute, extract_run_properties, RunPropertiesDefaults};
 use crate::error::{Error, Result};
 use std::io::Read;
 use std::path::Path;
@@ -430,7 +431,7 @@ fn extract_row_style(row_xml: &str) -> RowStyle {
             }
 
             // Font properties from first run in the cell
-            let (font, size, color, bold, italic) = extract_run_properties(cell_xml);
+            let (font, size, color, bold, italic) = extract_run_properties_local(cell_xml);
             style.font_family = font;
             style.font_size = size;
             style.font_color = color;
@@ -469,7 +470,7 @@ fn extract_cell_style(row_xml: &str, is_first_col: bool) -> CellStyle {
     };
 
     if let Some(cell_xml) = cell_xml {
-        let (font, size, color, bold, italic) = extract_run_properties(cell_xml);
+        let (font, size, color, bold, italic) = extract_run_properties_local(cell_xml);
         style.font_family = font;
         style.font_size = size;
         style.font_color = color;
@@ -512,61 +513,30 @@ fn extract_cell_shading(cell_xml: &str) -> Option<String> {
     None
 }
 
-fn extract_run_properties(xml: &str) -> (String, u32, String, bool, bool) {
-    let mut font_family = "Calibri".to_string();
-    let mut font_size = 22u32;
-    let mut font_color = "#000000".to_string();
-    let mut bold = false;
-    let mut italic = false;
-
+fn extract_run_properties_local(xml: &str) -> (String, u32, String, bool, bool) {
+    // Use the shared function with default defaults
     if let Some(rpr_start) = xml.find("<w:rPr") {
         if let Some(rpr_end) = xml[rpr_start..].find("</w:rPr>") {
             let rpr_xml = &xml[rpr_start..rpr_start + rpr_end + 8];
-
-            if rpr_xml.contains("<w:b/>") || rpr_xml.contains("<w:b ") {
-                bold = true;
-            }
-            if rpr_xml.contains("<w:i/>") || rpr_xml.contains("<w:i ") {
-                italic = true;
-            }
-
-            // Extract font size
-            if let Some(pos) = rpr_xml.find("<w:szCs") {
-                if let Some(val) = extract_attribute(&rpr_xml[pos..], "w:val=") {
-                    if let Ok(s) = val.parse::<u32>() {
-                        font_size = s;
-                    }
-                }
-            } else if let Some(pos) = rpr_xml.find("<w:sz") {
-                if let Some(val) = extract_attribute(&rpr_xml[pos..], "w:val=") {
-                    if let Ok(s) = val.parse::<u32>() {
-                        font_size = s;
-                    }
-                }
-            }
-
-            // Extract color
-            if let Some(pos) = rpr_xml.find("<w:color") {
-                if let Some(val) = extract_attribute(&rpr_xml[pos..], "w:val=") {
-                    font_color = format!("#{}", val);
-                }
-            }
-
-            // Extract font family
-            if let Some(pos) = rpr_xml.find("<w:rFonts") {
-                let fonts_xml = &rpr_xml[pos..];
-                if let Some(font) = extract_attribute(fonts_xml, "w:cs=") {
-                    font_family = font;
-                } else if let Some(font) = extract_attribute(fonts_xml, "w:ascii=") {
-                    font_family = font;
-                } else if let Some(font) = extract_attribute(fonts_xml, "w:hAnsi=") {
-                    font_family = font;
-                }
-            }
+            let props = extract_run_properties(rpr_xml, &RunPropertiesDefaults::default());
+            return (
+                props.font_family,
+                props.font_size,
+                props.font_color,
+                props.bold,
+                props.italic,
+            );
         }
     }
-
-    (font_family, font_size, font_color, bold, italic)
+    // Return defaults if no rPr found
+    let defaults = RunPropertiesDefaults::default();
+    (
+        defaults.font_family.to_string(),
+        defaults.font_size,
+        defaults.font_color.to_string(),
+        false,
+        false,
+    )
 }
 
 fn extract_borders(table_xml: &str) -> BorderStyles {
@@ -641,7 +611,7 @@ fn extract_caption_style(xml: &str, table_start: usize) -> TableCaptionStyle {
 
             // Check if it's a caption placeholder
             if p_xml.contains("table_caption_prefix") {
-                let (font, size, color, bold, italic) = extract_run_properties(p_xml);
+                let (font, size, color, bold, italic) = extract_run_properties_local(p_xml);
                 style.font_family = font;
                 style.font_size = size;
                 style.font_color = color;
@@ -686,23 +656,6 @@ fn extract_caption_style(xml: &str, table_start: usize) -> TableCaptionStyle {
     }
 
     style
-}
-
-fn extract_attribute(xml: &str, attr_name: &str) -> Option<String> {
-    if let Some(pos) = xml.find(attr_name) {
-        let start = pos + attr_name.len();
-        let rest = &xml[start..];
-
-        // Find the opening quote
-        if let Some(quote_pos) = rest.find('"') {
-            let after_quote = &rest[quote_pos + 1..];
-            // Find the closing quote
-            if let Some(end_quote) = after_quote.find('"') {
-                return Some(after_quote[..end_quote].to_string());
-            }
-        }
-    }
-    None
 }
 
 fn extract_cell_margins(table_xml: &str) -> CellMargins {
@@ -849,15 +802,14 @@ mod tests {
 
     #[test]
     fn test_debug_extract_real_template() {
-        let path = Path::new(
-            "/Users/kapong/workspace/lab/md2docx/examples/thai-manual/template/table.docx",
-        );
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/thai-manual/template/table.docx");
         if !path.exists() {
             println!("Template file not found, skipping test");
             return;
         }
 
-        let result = extract(path);
+        let result = extract(&path);
         match result {
             Ok(template) => {
                 println!("\n=== TABLE TEMPLATE EXTRACTION DEBUG ===\n");

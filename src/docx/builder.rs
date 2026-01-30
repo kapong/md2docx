@@ -10,18 +10,19 @@ use crate::docx::ooxml::{
     HeaderXml, ImageElement, Paragraph, ParagraphChild, Run, Table, TableCellElement, TableRow,
     TableWidth,
 };
+use crate::docx::rels_manager::RelIdManager;
 use crate::docx::toc::{TocBuilder, TocConfig};
 use crate::docx::xref::CrossRefContext;
 use crate::parser::{
     extract_inline_text, Alignment as ParserAlignment, Block, Inline, ListItem, ParsedDocument,
     TableCell as ParserTableCell,
 };
-use crate::template::extract::TableTemplate;
+use crate::template::extract::table::TableTemplate;
 use crate::Language;
 
 /// Tracks images during document building
 #[derive(Debug, Default)]
-pub struct ImageContext {
+pub(crate) struct ImageContext {
     /// Map of image source path to (filename, relationship_id, data)
     pub images: Vec<ImageInfo>,
     /// Base directory for resolving relative image paths
@@ -30,7 +31,7 @@ pub struct ImageContext {
 
 /// Information about an embedded image
 #[derive(Debug, Clone)]
-pub struct ImageInfo {
+pub(crate) struct ImageInfo {
     pub filename: String,      // e.g., "image1.png"
     pub rel_id: String,        // e.g., "rId4"
     pub src: String,           // Original source path/URL
@@ -41,13 +42,13 @@ pub struct ImageInfo {
 
 /// Tracks hyperlinks during document building
 #[derive(Debug, Default, Clone)]
-pub struct HyperlinkContext {
+pub(crate) struct HyperlinkContext {
     pub hyperlinks: Vec<HyperlinkInfo>,
 }
 
 /// Information about a hyperlink
 #[derive(Debug, Clone)]
-pub struct HyperlinkInfo {
+pub(crate) struct HyperlinkInfo {
     pub url: String,
     pub rel_id: String,
 }
@@ -60,11 +61,7 @@ impl HyperlinkContext {
     }
 
     /// Add a hyperlink and return its relationship ID
-    pub fn add_hyperlink(
-        &mut self,
-        url: &str,
-        rel_manager: &mut crate::docx::RelIdManager,
-    ) -> String {
+    pub fn add_hyperlink(&mut self, url: &str, rel_manager: &mut RelIdManager) -> String {
         let rel_id = rel_manager.next_id();
         self.hyperlinks.push(HyperlinkInfo {
             url: url.to_string(),
@@ -79,7 +76,7 @@ impl HyperlinkContext {
 /// Each separate list (ordered or unordered) gets a unique numId
 /// to ensure Word restarts numbering for each list independently.
 #[derive(Debug, Default, Clone)]
-pub struct NumberingContext {
+pub(crate) struct NumberingContext {
     /// List of (numId, is_ordered) pairs for all lists
     pub lists: Vec<NumberingInfo>,
     next_id: u32,
@@ -87,7 +84,7 @@ pub struct NumberingContext {
 
 /// Information about a list numbering instance
 #[derive(Debug, Clone)]
-pub struct NumberingInfo {
+pub(crate) struct NumberingInfo {
     pub num_id: u32,
     pub is_ordered: bool,
 }
@@ -123,6 +120,7 @@ impl ImageContext {
     }
 
     /// Set the base path for resolving relative image paths
+    #[allow(dead_code)]
     pub fn with_base_path(mut self, path: std::path::PathBuf) -> Self {
         self.base_path = Some(path);
         self
@@ -157,7 +155,7 @@ impl ImageContext {
         &mut self,
         src: &str,
         width: Option<&str>,
-        rel_manager: &mut crate::docx::RelIdManager,
+        rel_manager: &mut RelIdManager,
     ) -> String {
         let rel_id = rel_manager.next_id();
         let filename = self.generate_filename(src, rel_id.clone());
@@ -194,7 +192,7 @@ impl ImageContext {
         filename: &str,
         data: Vec<u8>,
         width: Option<&str>,
-        rel_manager: &mut crate::docx::RelIdManager,
+        rel_manager: &mut RelIdManager,
     ) -> String {
         let rel_id = rel_manager.next_id();
 
@@ -428,24 +426,37 @@ pub struct DocumentConfig {
     pub page: Option<PageConfig>,
 }
 
+/// Mapping of original relationship ID to media file content
+#[derive(Debug, Clone)]
+pub(crate) struct MediaFileMapping {
+    /// Original relationship ID from the template
+    pub original_rel_id: String,
+    /// Media file content and metadata
+    pub media_file: crate::template::extract::header_footer::MediaFile,
+}
+
+/// Header or footer entry with associated media files
+#[derive(Debug)]
+pub(crate) struct HeaderFooterEntry {
+    /// Header/footer number (1, 2, 3, etc.)
+    pub number: u32,
+    /// XML content as bytes
+    pub xml_bytes: Vec<u8>,
+    /// Media files referenced by this header/footer
+    pub media_files: Vec<MediaFileMapping>,
+}
+
 /// Result of building a document, including tracked images, hyperlinks, footnotes, and headers/footers
 #[derive(Debug)]
-pub struct BuildResult {
+pub(crate) struct BuildResult {
     pub document: DocumentXml,
     pub images: ImageContext,
     pub hyperlinks: HyperlinkContext,
     pub footnotes: FootnotesXml,
     pub numbering: NumberingContext,
-    pub headers: Vec<(
-        u32,
-        Vec<u8>,
-        Vec<(String, crate::template::extract::header_footer::MediaFile)>,
-    )>, // (header_num, xml_bytes, media)
-    pub footers: Vec<(
-        u32,
-        Vec<u8>,
-        Vec<(String, crate::template::extract::header_footer::MediaFile)>,
-    )>, // (footer_num, xml_bytes, media)
+    pub headers: Vec<HeaderFooterEntry>,
+    pub footers: Vec<HeaderFooterEntry>,
+    #[allow(dead_code)]
     pub has_toc_section_break: bool, // If true, there's a TOC section break needing empty refs
     pub toc_builder: Option<TocBuilder>,
 }
@@ -463,10 +474,10 @@ fn is_heading(block: &Block) -> bool {
 /// * `config` - Document configuration including TOC, header, footer settings
 ///
 /// # Returns
-/// A `BuildResult` containing the document and tracked images, hyperlinks, footnotes, and headers/footers
+/// A `Result<BuildResult>` containing the document and tracked images, hyperlinks, footnotes, and headers/footers
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// use md2docx::parser::parse_markdown_with_frontmatter;
 /// use md2docx::docx::build_document;
 /// use md2docx::docx::RelIdManager;
@@ -477,16 +488,16 @@ fn is_heading(block: &Block) -> bool {
 /// let parsed = parse_markdown_with_frontmatter(md);
 /// let config = DocumentConfig::default();
 /// let mut rel_manager = RelIdManager::new();
-/// let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None, None);
+/// let result = build_document(&parsed, Language::English, &config, &mut rel_manager, None, None).unwrap();
 /// ```
-pub fn build_document(
+pub(crate) fn build_document(
     doc: &ParsedDocument,
     lang: Language,
     config: &DocumentConfig,
-    rel_manager: &mut crate::docx::RelIdManager,
+    rel_manager: &mut RelIdManager,
     table_template: Option<&TableTemplate>,
-    image_template: Option<&crate::template::extract::ImageTemplate>,
-) -> BuildResult {
+    image_template: Option<&crate::template::extract::image::ImageTemplate>,
+) -> crate::error::Result<BuildResult> {
     let mut doc_xml = DocumentXml::new();
     let mut image_ctx = ImageContext::new();
     // Set base path for image resolution if provided in config
@@ -534,23 +545,23 @@ pub fn build_document(
 
     for (i, block) in doc.blocks.iter().enumerate() {
         // Create build context
-        let mut ctx = BuildContext::new(
-            &mut image_ctx,
-            &mut hyperlink_ctx,
-            &mut numbering_ctx,
-            &mut image_id_counter,
+        let mut ctx = BuildContext::new(BuildContextParams {
+            image_ctx: &mut image_ctx,
+            hyperlink_ctx: &mut hyperlink_ctx,
+            numbering_ctx: &mut numbering_ctx,
+            image_id: &mut image_id_counter,
             doc,
-            &mut footnotes,
-            &mut toc_builder,
-            &mut bookmark_id_counter,
-            &mut xref_ctx,
+            footnotes: &mut footnotes,
+            toc_builder: &mut toc_builder,
+            bookmark_id_counter: &mut bookmark_id_counter,
+            xref_ctx: &mut xref_ctx,
             rel_manager,
             table_template,
             image_template,
-            &mut table_count,
-            &mut figure_count,
+            table_count: &mut table_count,
+            figure_count: &mut figure_count,
             lang,
-        );
+        });
 
         // Insert blank paragraph before heading if previous block was not a heading
         if is_heading(block) {
@@ -646,7 +657,19 @@ pub fn build_document(
         if let Ok(Some(rendered)) =
             crate::template::render::header_footer::render_default_header(hf_template, &ctx, 100)
         {
-            headers.push((1, rendered.xml, rendered.media));
+            let media_mappings = rendered
+                .media
+                .into_iter()
+                .map(|(rel_id, media_file)| MediaFileMapping {
+                    original_rel_id: rel_id,
+                    media_file,
+                })
+                .collect();
+            headers.push(HeaderFooterEntry {
+                number: 1,
+                xml_bytes: rendered.xml,
+                media_files: media_mappings,
+            });
         }
 
         // Render first page header (if different first page)
@@ -658,14 +681,33 @@ pub fn build_document(
                     200,
                 )
             {
-                headers.push((2, rendered.xml, rendered.media));
+                let media_mappings = rendered
+                    .media
+                    .into_iter()
+                    .map(|(rel_id, media_file)| MediaFileMapping {
+                        original_rel_id: rel_id,
+                        media_file,
+                    })
+                    .collect();
+                headers.push(HeaderFooterEntry {
+                    number: 2,
+                    xml_bytes: rendered.xml,
+                    media_files: media_mappings,
+                });
             }
             header_footer_refs.different_first_page = true;
         } else if config.different_first_page {
             // Template doesn't have different first page, but config requests it
             // Generate empty header for suppression
             let empty_header = HeaderXml::new(HeaderConfig::empty(), "");
-            headers.push((2, empty_header.to_xml().unwrap(), Vec::new()));
+            let xml = empty_header.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate empty header: {}", e))
+            })?;
+            headers.push(HeaderFooterEntry {
+                number: 2,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
             header_footer_refs.different_first_page = true;
         }
 
@@ -673,7 +715,19 @@ pub fn build_document(
         if let Ok(Some(rendered)) =
             crate::template::render::header_footer::render_default_footer(hf_template, &ctx, 300)
         {
-            footers.push((1, rendered.xml, rendered.media));
+            let media_mappings = rendered
+                .media
+                .into_iter()
+                .map(|(rel_id, media_file)| MediaFileMapping {
+                    original_rel_id: rel_id,
+                    media_file,
+                })
+                .collect();
+            footers.push(HeaderFooterEntry {
+                number: 1,
+                xml_bytes: rendered.xml,
+                media_files: media_mappings,
+            });
         }
 
         // Render first page footer (if different first page)
@@ -685,14 +739,33 @@ pub fn build_document(
                     400,
                 )
             {
-                footers.push((2, rendered.xml, rendered.media));
+                let media_mappings = rendered
+                    .media
+                    .into_iter()
+                    .map(|(rel_id, media_file)| MediaFileMapping {
+                        original_rel_id: rel_id,
+                        media_file,
+                    })
+                    .collect();
+                footers.push(HeaderFooterEntry {
+                    number: 2,
+                    xml_bytes: rendered.xml,
+                    media_files: media_mappings,
+                });
             }
             header_footer_refs.different_first_page = true;
         } else if config.different_first_page {
             // Template doesn't have different first page, but config requests it
             // Generate empty footer for suppression
             let empty_footer = FooterXml::new(FooterConfig::empty(), "");
-            footers.push((2, empty_footer.to_xml().unwrap(), Vec::new()));
+            let xml = empty_footer.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate empty footer: {}", e))
+            })?;
+            footers.push(HeaderFooterEntry {
+                number: 2,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
             header_footer_refs.different_first_page = true;
         }
 
@@ -700,25 +773,60 @@ pub fn build_document(
         // These are used when we need sections with NO headers/footers at all
         // (separate from first-page headers which may have content)
         let suppression_header = HeaderXml::new(HeaderConfig::empty(), "");
-        headers.push((3, suppression_header.to_xml().unwrap(), Vec::new()));
+        let xml = suppression_header.to_xml().map_err(|e| {
+            crate::error::Error::Xml(format!("Failed to generate suppression header: {}", e))
+        })?;
+        headers.push(HeaderFooterEntry {
+            number: 3,
+            xml_bytes: xml,
+            media_files: Vec::new(),
+        });
 
         let suppression_footer = FooterXml::new(FooterConfig::empty(), "");
-        footers.push((3, suppression_footer.to_xml().unwrap(), Vec::new()));
+        let xml = suppression_footer.to_xml().map_err(|e| {
+            crate::error::Error::Xml(format!("Failed to generate suppression footer: {}", e))
+        })?;
+        footers.push(HeaderFooterEntry {
+            number: 3,
+            xml_bytes: xml,
+            media_files: Vec::new(),
+        });
     } else {
         // Fall back to config-based generation (existing code)
         if !config.header.is_empty() {
             // Generate default header (header1.xml)
             let header_xml = HeaderXml::new(config.header.clone(), &config.title);
-            headers.push((1, header_xml.to_xml().unwrap(), Vec::new()));
+            let xml = header_xml.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate header: {}", e))
+            })?;
+            headers.push(HeaderFooterEntry {
+                number: 1,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
             // Relationship ID will be set in lib.rs
 
             // Generate empty header (ID 2) for first page if different_first_page is set
             let empty_header = HeaderXml::new(HeaderConfig::empty(), "");
-            headers.push((2, empty_header.to_xml().unwrap(), Vec::new()));
+            let xml = empty_header.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate empty header: {}", e))
+            })?;
+            headers.push(HeaderFooterEntry {
+                number: 2,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
 
             // Also generate header3 for cover/TOC suppression (same as header2 but separate file)
             let suppression_header = HeaderXml::new(HeaderConfig::empty(), "");
-            headers.push((3, suppression_header.to_xml().unwrap(), Vec::new()));
+            let xml = suppression_header.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate suppression header: {}", e))
+            })?;
+            headers.push(HeaderFooterEntry {
+                number: 3,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
 
             if config.different_first_page {
                 header_footer_refs.different_first_page = true;
@@ -728,16 +836,37 @@ pub fn build_document(
         if !config.footer.is_empty() {
             // Generate default footer (footer1.xml)
             let footer_xml = FooterXml::new(config.footer.clone(), &config.title);
-            footers.push((1, footer_xml.to_xml().unwrap(), Vec::new()));
+            let xml = footer_xml.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate footer: {}", e))
+            })?;
+            footers.push(HeaderFooterEntry {
+                number: 1,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
             // Relationship ID will be set in lib.rs
 
             // Generate empty footer (ID 2) for first page if different_first_page is set
             let empty_footer = FooterXml::new(FooterConfig::empty(), "");
-            footers.push((2, empty_footer.to_xml().unwrap(), Vec::new()));
+            let xml = empty_footer.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate empty footer: {}", e))
+            })?;
+            footers.push(HeaderFooterEntry {
+                number: 2,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
 
             // Also generate footer3 for cover/TOC suppression (same as footer2 but separate file)
             let suppression_footer = FooterXml::new(FooterConfig::empty(), "");
-            footers.push((3, suppression_footer.to_xml().unwrap(), Vec::new()));
+            let xml = suppression_footer.to_xml().map_err(|e| {
+                crate::error::Error::Xml(format!("Failed to generate suppression footer: {}", e))
+            })?;
+            footers.push(HeaderFooterEntry {
+                number: 3,
+                xml_bytes: xml,
+                media_files: Vec::new(),
+            });
 
             if config.different_first_page {
                 header_footer_refs.different_first_page = true;
@@ -748,7 +877,7 @@ pub fn build_document(
     // Set header/footer refs on document
     doc_xml.header_footer_refs = header_footer_refs;
 
-    BuildResult {
+    Ok(BuildResult {
         document: doc_xml,
         images: image_ctx,
         hyperlinks: hyperlink_ctx,
@@ -758,11 +887,11 @@ pub fn build_document(
         footers,
         has_toc_section_break: false,
         toc_builder: Some(toc_builder),
-    }
+    })
 }
 
-/// Context for building a document, holding all tracked state
-pub struct BuildContext<'a> {
+/// Parameters for creating a BuildContext
+pub(crate) struct BuildContextParams<'a> {
     pub image_ctx: &'a mut ImageContext,
     pub hyperlink_ctx: &'a mut HyperlinkContext,
     pub numbering_ctx: &'a mut NumberingContext,
@@ -772,48 +901,51 @@ pub struct BuildContext<'a> {
     pub toc_builder: &'a mut TocBuilder,
     pub bookmark_id_counter: &'a mut u32,
     pub xref_ctx: &'a mut CrossRefContext,
-    pub rel_manager: &'a mut crate::docx::RelIdManager,
+    pub rel_manager: &'a mut RelIdManager,
     pub table_template: Option<&'a TableTemplate>,
-    pub image_template: Option<&'a crate::template::extract::ImageTemplate>,
+    pub image_template: Option<&'a crate::template::extract::image::ImageTemplate>,
+    pub table_count: &'a mut u32,
+    pub figure_count: &'a mut u32,
+    pub lang: Language,
+}
+
+/// Context for building a document, holding all tracked state
+pub(crate) struct BuildContext<'a> {
+    pub image_ctx: &'a mut ImageContext,
+    pub hyperlink_ctx: &'a mut HyperlinkContext,
+    pub numbering_ctx: &'a mut NumberingContext,
+    pub image_id: &'a mut u32,
+    pub doc: &'a ParsedDocument,
+    pub footnotes: &'a mut FootnotesXml,
+    pub toc_builder: &'a mut TocBuilder,
+    pub bookmark_id_counter: &'a mut u32,
+    pub xref_ctx: &'a mut CrossRefContext,
+    pub rel_manager: &'a mut RelIdManager,
+    pub table_template: Option<&'a TableTemplate>,
+    pub image_template: Option<&'a crate::template::extract::image::ImageTemplate>,
     pub table_count: &'a mut u32,
     pub figure_count: &'a mut u32,
     pub lang: Language,
 }
 
 impl<'a> BuildContext<'a> {
-    pub fn new(
-        image_ctx: &'a mut ImageContext,
-        hyperlink_ctx: &'a mut HyperlinkContext,
-        numbering_ctx: &'a mut NumberingContext,
-        image_id: &'a mut u32,
-        doc: &'a ParsedDocument,
-        footnotes: &'a mut FootnotesXml,
-        toc_builder: &'a mut TocBuilder,
-        bookmark_id_counter: &'a mut u32,
-        xref_ctx: &'a mut CrossRefContext,
-        rel_manager: &'a mut crate::docx::RelIdManager,
-        table_template: Option<&'a TableTemplate>,
-        image_template: Option<&'a crate::template::extract::ImageTemplate>,
-        table_count: &'a mut u32,
-        figure_count: &'a mut u32,
-        lang: Language,
-    ) -> Self {
+    pub fn new(params: BuildContextParams<'a>) -> Self {
         Self {
-            image_ctx,
-            hyperlink_ctx,
-            numbering_ctx,
-            image_id,
-            doc,
-            footnotes,
-            toc_builder,
-            bookmark_id_counter,
-            xref_ctx,
-            rel_manager,
-            table_template,
-            image_template,
-            table_count,
-            figure_count,
-            lang,
+            image_ctx: params.image_ctx,
+            hyperlink_ctx: params.hyperlink_ctx,
+            numbering_ctx: params.numbering_ctx,
+            image_id: params.image_id,
+            doc: params.doc,
+            footnotes: params.footnotes,
+            toc_builder: params.toc_builder,
+            bookmark_id_counter: params.bookmark_id_counter,
+            xref_ctx: params.xref_ctx,
+            rel_manager: params.rel_manager,
+            table_template: params.table_template,
+            image_template: params.image_template,
+            table_count: params.table_count,
+            figure_count: params.figure_count,
+            lang: params.lang,
         }
     }
 }
@@ -964,12 +1096,12 @@ fn block_to_elements(
                     caption_para = caption_para.align(&tmpl.alignment);
 
                     // Add bookmark if we have an ID
-                    if let Some(fig_id) = id {
-                        if let Some(anchor) = ctx.xref_ctx.resolve(fig_id) {
-                            *ctx.bookmark_id_counter += 1;
-                            caption_para = caption_para
-                                .with_bookmark(*ctx.bookmark_id_counter, &anchor.bookmark_name);
-                        }
+                    if let Some(anchor) =
+                        id.as_ref().and_then(|fig_id| ctx.xref_ctx.resolve(fig_id))
+                    {
+                        *ctx.bookmark_id_counter += 1;
+                        caption_para = caption_para
+                            .with_bookmark(*ctx.bookmark_id_counter, &anchor.bookmark_name);
                     }
 
                     elements.push(DocElement::Paragraph(Box::new(caption_para)));
@@ -1099,14 +1231,12 @@ fn block_to_elements(
                             caption_para = caption_para.align(&tmpl.alignment);
 
                             // Add bookmark if we have an ID
-                            if let Some(fig_id) = id {
-                                if let Some(anchor) = ctx.xref_ctx.resolve(fig_id) {
-                                    *ctx.bookmark_id_counter += 1;
-                                    caption_para = caption_para.with_bookmark(
-                                        *ctx.bookmark_id_counter,
-                                        &anchor.bookmark_name,
-                                    );
-                                }
+                            if let Some(anchor) =
+                                id.as_ref().and_then(|fig_id| ctx.xref_ctx.resolve(fig_id))
+                            {
+                                *ctx.bookmark_id_counter += 1;
+                                caption_para = caption_para
+                                    .with_bookmark(*ctx.bookmark_id_counter, &anchor.bookmark_name);
                             }
 
                             elements.push(DocElement::Paragraph(Box::new(caption_para)));
@@ -1193,12 +1323,13 @@ fn block_to_elements(
                 );
 
                 // Add bookmark if we have an ID
-                if let Some(table_id) = id {
-                    if let Some(anchor) = ctx.xref_ctx.resolve(table_id) {
-                        *ctx.bookmark_id_counter += 1;
-                        caption_para = caption_para
-                            .with_bookmark(*ctx.bookmark_id_counter, &anchor.bookmark_name);
-                    }
+                if let Some(anchor) = id
+                    .as_ref()
+                    .and_then(|table_id| ctx.xref_ctx.resolve(table_id))
+                {
+                    *ctx.bookmark_id_counter += 1;
+                    caption_para =
+                        caption_para.with_bookmark(*ctx.bookmark_id_counter, &anchor.bookmark_name);
                 }
 
                 elements.push(DocElement::Paragraph(Box::new(caption_para)));
@@ -1504,13 +1635,15 @@ fn table_to_docx(
     for (i, cell) in headers.iter().enumerate() {
         let alignment = alignments.get(i).copied().unwrap_or(ParserAlignment::None);
         let cell_elem = create_table_cell_with_template(
-            &cell.content,
-            alignment,
-            true, // is_header = true
-            cell_width,
-            0, // row_index = 0 for header
-            i, // col_index
-            ctx.table_template,
+            TableCellParams {
+                content: &cell.content,
+                alignment,
+                is_header: true,
+                width: cell_width,
+                row_index: 0,
+                col_index: i,
+                template: ctx.table_template,
+            },
             ctx,
         );
         header_row = header_row.add_cell(cell_elem);
@@ -1527,13 +1660,15 @@ fn table_to_docx(
                 .copied()
                 .unwrap_or(ParserAlignment::None);
             let cell_elem = create_table_cell_with_template(
-                &cell.content,
-                alignment,
-                false, // is_header = false
-                cell_width,
-                actual_row_idx,
-                col_idx,
-                ctx.table_template,
+                TableCellParams {
+                    content: &cell.content,
+                    alignment,
+                    is_header: false,
+                    width: cell_width,
+                    row_index: actual_row_idx,
+                    col_index: col_idx,
+                    template: ctx.table_template,
+                },
                 ctx,
             );
             data_row = data_row.add_cell(cell_elem);
@@ -1544,21 +1679,26 @@ fn table_to_docx(
     table
 }
 
+/// Parameters for creating a table cell with template styling
+pub struct TableCellParams<'a, 'b> {
+    pub content: &'a [Inline],
+    pub alignment: ParserAlignment,
+    pub is_header: bool,
+    pub width: TableWidth,
+    pub row_index: usize,
+    pub col_index: usize,
+    pub template: Option<&'b crate::template::extract::table::TableTemplate>,
+}
+
 /// Create a table cell with template styling applied
 fn create_table_cell_with_template(
-    content: &[Inline],
-    alignment: ParserAlignment,
-    is_header: bool,
-    width: TableWidth,
-    row_index: usize,
-    col_index: usize,
-    template: Option<&TableTemplate>,
+    params: TableCellParams,
     ctx: &mut BuildContext,
 ) -> TableCellElement {
-    let children = inlines_to_children(content, ctx);
+    let children = inlines_to_children(params.content, ctx);
 
     // Build paragraph from children
-    let mut p = if let Some(tmpl) = template {
+    let mut p = if let Some(tmpl) = params.template {
         Paragraph::new()
             .spacing(tmpl.cell_spacing.before, tmpl.cell_spacing.after)
             .line_spacing(tmpl.cell_spacing.line as i32, &tmpl.cell_spacing.line_rule)
@@ -1567,9 +1707,9 @@ fn create_table_cell_with_template(
     };
 
     // Apply font properties from template
-    if let Some(tmpl) = template {
-        let row_style = tmpl.row_style_for_index(row_index);
-        let col_style = tmpl.cell_style_for_column(col_index);
+    if let Some(tmpl) = params.template {
+        let row_style = tmpl.row_style_for_index(params.row_index);
+        let col_style = tmpl.cell_style_for_column(params.col_index);
 
         // Process children with template styling
         for child in children {
@@ -1582,7 +1722,7 @@ fn create_table_cell_with_template(
 
                     // For header row (index 0), use row_style for bold/italic
                     // For data rows, use col_style (first_column or other_columns)
-                    if row_index == 0 {
+                    if params.row_index == 0 {
                         // Header row: use header style for bold/italic
                         r.bold = row_style.bold;
                         r.italic = row_style.italic;
@@ -1615,7 +1755,7 @@ fn create_table_cell_with_template(
         for child in children {
             p = match child {
                 ParagraphChild::Run(mut r) => {
-                    if is_header {
+                    if params.is_header {
                         r.bold = true;
                     }
                     p.add_run(r)
@@ -1625,16 +1765,20 @@ fn create_table_cell_with_template(
         }
     }
 
-    let mut cell = TableCellElement::new().width(width).add_paragraph(p);
+    let mut cell = TableCellElement::new().width(params.width).add_paragraph(p);
 
     // Apply alignment
-    let align_str = match alignment {
+    let align_str = match params.alignment {
         ParserAlignment::Left => Some("left"),
         ParserAlignment::Right => Some("right"),
         ParserAlignment::Center => Some("center"),
         ParserAlignment::None => {
             // If no markdown alignment, use template alignment if available
-            template.map(|tmpl| tmpl.cell_style_for_column(col_index).alignment.as_str())
+            params.template.map(|tmpl| {
+                tmpl.cell_style_for_column(params.col_index)
+                    .alignment
+                    .as_str()
+            })
         }
     };
     if let Some(align) = align_str {
@@ -1642,15 +1786,17 @@ fn create_table_cell_with_template(
     }
 
     // Apply vertical alignment from template
-    if let Some(tmpl) = template {
-        let v_align = &tmpl.cell_style_for_column(col_index).vertical_alignment;
+    if let Some(tmpl) = params.template {
+        let v_align = &tmpl
+            .cell_style_for_column(params.col_index)
+            .vertical_alignment;
         if !v_align.is_empty() {
             cell = cell.vertical_alignment(v_align);
         }
     }
 
     // Apply shading from template or default
-    if let Some(shading) = get_row_shading(row_index, template) {
+    if let Some(shading) = get_row_shading(params.row_index, params.template) {
         cell.shading = Some(shading);
     }
 
@@ -1658,7 +1804,10 @@ fn create_table_cell_with_template(
 }
 
 /// Get the background color for a table row based on template
-fn get_row_shading(row_index: usize, template: Option<&TableTemplate>) -> Option<String> {
+fn get_row_shading(
+    row_index: usize,
+    template: Option<&crate::template::extract::table::TableTemplate>,
+) -> Option<String> {
     if let Some(tmpl) = template {
         if row_index == 0 {
             // Header row
@@ -2061,7 +2210,7 @@ mod tests {
     fn test_footnote_reference() {
         let md = "This is text with a footnote[^1].\n\n[^1]: This is the footnote content.";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2069,7 +2218,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Should have one footnote
         assert_eq!(result.footnotes.len(), 1);
@@ -2095,7 +2245,7 @@ mod tests {
     fn test_multiple_footnotes() {
         let md = "Text with two footnotes[^1][^2].\n\n[^1]: First footnote\n[^2]: Second footnote";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2103,7 +2253,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Should have two footnotes
         assert_eq!(result.footnotes.len(), 2);
@@ -2133,7 +2284,7 @@ mod tests {
     fn test_footnote_with_formatting() {
         let md = "Text[^1]\n\n[^1]: Footnote with **bold** and *italic* text.";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2141,7 +2292,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.footnotes.len(), 1);
 
@@ -2167,7 +2319,7 @@ mod tests {
     fn test_footnote_missing_definition() {
         let md = "Text with missing footnote[^99].";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2175,7 +2327,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Should have no footnotes (definition missing)
         assert_eq!(result.footnotes.len(), 0);
@@ -2196,7 +2349,7 @@ mod tests {
     fn test_footnote_in_heading() {
         let md = "# Heading with footnote[^1]\n\n[^1]: Footnote content";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2204,7 +2357,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.footnotes.len(), 1);
 
@@ -2221,7 +2375,7 @@ mod tests {
     fn test_footnote_in_list() {
         let md = "- Item with footnote[^1]\n\n[^1]: Footnote content";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2229,7 +2383,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.footnotes.len(), 1);
 
@@ -2246,7 +2401,7 @@ mod tests {
     fn test_footnote_in_blockquote() {
         let md = "> Quote with footnote[^1]\n\n[^1]: Footnote content";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2254,7 +2409,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.footnotes.len(), 1);
 
@@ -2274,7 +2430,7 @@ mod tests {
     fn test_footnote_in_table() {
         let md = "| Header |\n|--------|\n| Cell[^1] |\n\n[^1]: Footnote content";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2282,7 +2438,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.footnotes.len(), 1);
 
@@ -2306,7 +2463,7 @@ mod tests {
     fn test_footnote_multiline_content() {
         let md = "Text[^1]\n\n[^1]: First line\n    Second line\n    Third line";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2314,7 +2471,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.footnotes.len(), 1);
 
@@ -2331,7 +2489,7 @@ mod tests {
     fn test_footnote_xml_generation() {
         let md = "Text[^1]\n\n[^1]: Footnote content";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2339,7 +2497,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         let xml = result.footnotes.to_xml().unwrap();
         let xml_str = String::from_utf8(xml).unwrap();
@@ -2375,7 +2534,7 @@ mod tests {
         };
 
         let config = no_toc_config(); // Disable TOC for this test
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &doc,
             Language::English,
@@ -2383,7 +2542,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Verify the document was built successfully
         assert!(!result.document.elements.is_empty());
@@ -2421,7 +2581,7 @@ mod tests {
         };
 
         let config = DocumentConfig::default();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &doc,
             Language::English,
@@ -2429,7 +2589,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Should show placeholder for unresolved reference
         let paragraphs = get_paragraphs(&result.document);
@@ -2473,7 +2634,7 @@ mod tests {
         };
 
         let config = DocumentConfig::default();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &doc,
             Language::English,
@@ -2481,7 +2642,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Check that figure reference is properly formatted
         let paragraphs = get_paragraphs(&result.document);
@@ -2499,7 +2661,7 @@ mod tests {
     fn test_build_result_includes_footnotes() {
         let md = "Text[^1]\n\n[^1]: Footnote";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2507,7 +2669,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // BuildResult should include footnotes field
         assert!(!result.footnotes.is_empty());
@@ -2529,7 +2692,7 @@ mod tests {
     fn test_build_document_simple() {
         let md = "# Hello World\n\nThis is a paragraph.";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2537,7 +2700,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
         assert_eq!(paragraphs.len(), 2);
@@ -2557,7 +2721,7 @@ mod tests {
     fn test_heading_levels() {
         let md = "# H1\n\n## H2\n\n### H3\n\n#### H4\n\n##### H5";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2565,7 +2729,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2581,7 +2746,7 @@ mod tests {
     fn test_inline_formatting() {
         let md = "This is **bold**, *italic*, and `code`.";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2589,7 +2754,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2621,7 +2787,7 @@ mod tests {
     fn test_nested_formatting() {
         let md = "This is **bold and *italic*** text.";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2629,7 +2795,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2647,7 +2814,7 @@ mod tests {
     fn test_code_block() {
         let md = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2655,7 +2822,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2677,7 +2845,7 @@ mod tests {
     fn test_blockquote() {
         let md = "> This is a quote\n> With multiple lines";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2685,7 +2853,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2703,7 +2872,7 @@ mod tests {
     fn test_unordered_list() {
         let md = "- Item 1\n- Item 2\n- Item 3";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2711,7 +2880,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2725,7 +2895,7 @@ mod tests {
     fn test_ordered_list() {
         let md = "1. First\n2. Second\n3. Third";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2733,7 +2903,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2749,7 +2920,7 @@ mod tests {
     fn test_thematic_break() {
         let md = "---";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2757,7 +2928,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2770,7 +2942,7 @@ mod tests {
     fn test_link() {
         let md = "[OpenAI](https://openai.com)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2778,7 +2950,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2805,7 +2978,7 @@ mod tests {
     fn test_strikethrough() {
         let md = "~~deleted text~~";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2813,7 +2986,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2829,7 +3003,7 @@ mod tests {
     fn test_soft_break() {
         let md = "Line 1\nLine 2"; // Single newline = soft break
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2837,7 +3011,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2852,7 +3027,7 @@ mod tests {
     fn test_hard_break() {
         let md = "Line 1  \nLine 2"; // Two spaces + newline = hard break
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2860,7 +3035,8 @@ mod tests {
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2895,7 +3071,7 @@ fn main() {
 End of document.
 "#;
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2903,7 +3079,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         // Count paragraphs:
@@ -2926,7 +3103,7 @@ End of document.
     fn test_html_blocks_skipped() {
         let md = "<div>This is HTML</div>\n\nRegular paragraph";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2934,7 +3111,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2950,7 +3128,7 @@ End of document.
     fn test_mixed_formatting_in_paragraph() {
         let md = "Normal **bold** *italic* `code` ~~strike~~";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2958,7 +3136,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2975,7 +3154,7 @@ End of document.
     fn test_blockquote_with_formatting() {
         let md = "> This is a **bold** quote";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -2983,7 +3162,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -2997,7 +3177,7 @@ End of document.
     fn test_list_with_nested_content() {
         let md = "- Item with **bold** text\n- Another item";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3005,7 +3185,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3019,7 +3200,7 @@ End of document.
     fn test_heading_with_inline_code() {
         let md = "# Heading with `code`";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3027,7 +3208,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3042,7 +3224,7 @@ End of document.
     fn test_multiple_code_blocks() {
         let md = "```rust\nfn main() {}\n```\n\n```python\ndef main():\n    pass\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3050,7 +3232,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3066,7 +3249,7 @@ End of document.
     fn test_preserve_whitespace_in_code() {
         let md = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3074,7 +3257,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3089,7 +3273,7 @@ End of document.
     fn test_code_block_with_line_numbers() {
         let md = "```rust,ln\nline 1\nline 2\nline 3\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3097,7 +3281,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3143,7 +3328,7 @@ End of document.
     fn test_code_block_with_highlighting() {
         let md = "```rust,hl=2\nline 1\nline 2\nline 3\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3151,7 +3336,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3168,7 +3354,7 @@ End of document.
     fn test_code_block_with_line_numbers_and_highlighting() {
         let md = "```rust,hl=2,ln\nline 1\nline 2\nline 3\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3176,7 +3362,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3196,7 +3383,7 @@ End of document.
     fn test_code_block_with_multiple_highlights() {
         let md = "```rust,hl=1,3\nline 1\nline 2\nline 3\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3204,7 +3391,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3218,7 +3406,7 @@ End of document.
     fn test_code_block_with_filename() {
         let md = "```rust,filename=main.rs\nfn main() {}\n```";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3226,7 +3414,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3245,7 +3434,7 @@ End of document.
     fn test_link_with_formatting() {
         let md = "[**bold link**](https://example.com)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3253,7 +3442,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
@@ -3269,7 +3459,7 @@ End of document.
     fn test_table_conversion() {
         let md = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3277,7 +3467,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         // Should have table element + empty paragraph
@@ -3290,7 +3481,7 @@ End of document.
     fn test_table_with_formatting() {
         let md = "| **Bold** | *Italic* |\n|----------|----------|\n| `code`   | ~~strike~~ |";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3298,7 +3489,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         // Verify table exists
@@ -3312,7 +3504,7 @@ End of document.
     fn test_table_alignment() {
         let md = "| Left | Center | Right |\n|:-----|:------:|------:|\n| L    | C      | R     |";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3320,7 +3512,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         if let Some(DocElement::Table(table)) = docx.elements.first() {
@@ -3346,7 +3539,7 @@ End of document.
     fn test_table_with_multiple_rows() {
         let md = "| Name | Age |\n|------|-----|\n| John | 30  |\n| Jane | 25  |\n| Bob  | 35  |";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3354,7 +3547,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         if let Some(DocElement::Table(table)) = docx.elements.first() {
@@ -3371,7 +3565,7 @@ End of document.
     fn test_table_header_shading() {
         let md = "| H1 | H2 |\n|----|----|\n| D1 | D2 |";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3379,7 +3573,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         if let Some(DocElement::Table(table)) = docx.elements.first() {
@@ -3400,7 +3595,7 @@ End of document.
     fn test_table_header_bold() {
         let md = "| Header |\n|--------|\n| Data   |";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3408,7 +3603,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         if let Some(DocElement::Table(table)) = docx.elements.first() {
@@ -3433,7 +3629,7 @@ End of document.
     fn test_document_with_table_and_paragraphs() {
         let md = "# Title\n\nSome text.\n\n| Col 1 | Col 2 |\n|-------|-------|\n| A     | B     |\n\nMore text.";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3441,7 +3637,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
         let docx = &result.document;
 
         // Should have: heading, paragraph, table, empty paragraph, paragraph
@@ -3458,7 +3655,7 @@ End of document.
     #[test]
     fn test_image_context_add() {
         let mut ctx = ImageContext::new();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let id = ctx.add_image("test.png", None, &mut rel_manager);
         // rId1-5 are reserved, so first image should be rId6
         assert_eq!(id, "rId6");
@@ -3471,7 +3668,7 @@ End of document.
     #[test]
     fn test_image_context_multiple() {
         let mut ctx = ImageContext::new();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let id1 = ctx.add_image("img1.png", None, &mut rel_manager);
         let id2 = ctx.add_image("img2.png", None, &mut rel_manager);
 
@@ -3486,7 +3683,7 @@ End of document.
     #[test]
     fn test_image_context_dimensions_default() {
         let mut ctx = ImageContext::new();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         ctx.add_image("test.png", None, &mut rel_manager);
         // Default 6x4 inches
         assert_eq!(ctx.images[0].width_emu, 5486400);
@@ -3496,7 +3693,7 @@ End of document.
     #[test]
     fn test_image_context_dimensions_inches() {
         let mut ctx = ImageContext::new();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         ctx.add_image("test.png", Some("2in"), &mut rel_manager);
         // 2 inches = 1828800 EMUs
         assert_eq!(ctx.images[0].width_emu, 1828800);
@@ -3505,7 +3702,7 @@ End of document.
     #[test]
     fn test_image_context_dimensions_pixels() {
         let mut ctx = ImageContext::new();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         ctx.add_image("test.png", Some("96px"), &mut rel_manager);
         // 96px = 1 inch = 914400 EMUs
         assert_eq!(ctx.images[0].width_emu, 914400);
@@ -3514,7 +3711,7 @@ End of document.
     #[test]
     fn test_image_context_dimensions_percentage() {
         let mut ctx = ImageContext::new();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         ctx.add_image("test.png", Some("50%"), &mut rel_manager);
         // 50% of 6.0in = 3.0in = 2743200 EMUs
         assert_eq!(ctx.images[0].width_emu, 2743200);
@@ -3537,7 +3734,7 @@ End of document.
     fn test_build_document_with_image() {
         let md = "![Test](test.png)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3545,7 +3742,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.images.images.len(), 1);
         assert_eq!(result.images.images[0].rel_id, "rId6");
@@ -3566,7 +3764,7 @@ End of document.
     fn test_build_document_image_with_width() {
         let md = "![alt](image.png){width=50%}";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3574,7 +3772,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Check that image was added with correct width
         assert_eq!(result.images.images.len(), 1);
@@ -3607,7 +3806,7 @@ End of document.
             ..Default::default()
         };
 
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3615,7 +3814,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Should have three headers and three footers:
         // 1. Default header/footer with content
@@ -3625,13 +3825,13 @@ End of document.
         assert_eq!(result.footers.len(), 3);
 
         // Check header XML
-        let header_xml = String::from_utf8(result.headers[0].1.clone()).unwrap();
+        let header_xml = String::from_utf8(result.headers[0].xml_bytes.clone()).unwrap();
         assert!(header_xml.contains("<w:hdr"));
         assert!(header_xml.contains("My Document"));
         assert!(header_xml.contains("STYLEREF"));
 
         // Check footer XML
-        let footer_xml = String::from_utf8(result.footers[0].1.clone()).unwrap();
+        let footer_xml = String::from_utf8(result.footers[0].xml_bytes.clone()).unwrap();
         assert!(footer_xml.contains("<w:ftr"));
         assert!(footer_xml.contains("PAGE"));
 
@@ -3654,7 +3854,7 @@ End of document.
             ..Default::default()
         };
 
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3662,7 +3862,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Should have three headers and three footers:
         // 1. Default header/footer with content
@@ -3690,7 +3891,7 @@ End of document.
             ..Default::default()
         };
 
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3698,7 +3899,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Should have no headers or footers
         assert_eq!(result.headers.len(), 0);
@@ -3721,7 +3923,7 @@ End of document.
     fn test_build_document_multiple_images() {
         let md = "![Test1](test1.png)\n\n![Test2](test2.png)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3729,7 +3931,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(result.images.images.len(), 2);
         assert_eq!(result.images.images[0].rel_id, "rId6");
@@ -3740,7 +3943,7 @@ End of document.
     fn test_toc_generation() {
         let md = "# Chapter 1\n\n## Section 1.1\n\n### Subsection 1.1.1\n\n# Chapter 2";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3748,7 +3951,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Check toc_builder
         let toc_builder = result.toc_builder.as_ref().unwrap();
@@ -3783,7 +3987,7 @@ End of document.
     fn test_toc_disabled() {
         let md = "# Chapter 1\n\n## Section 1.1";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3791,7 +3995,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -3817,7 +4022,7 @@ End of document.
             },
             ..Default::default()
         };
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3825,7 +4030,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // toc_builder should have ALL entries, filtering happens during generation
         let toc_builder = result.toc_builder.as_ref().unwrap();
@@ -3841,7 +4047,7 @@ End of document.
     fn test_toc_with_explicit_id() {
         let md = "# Introduction {#intro}\n\n## Getting Started {#start}";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3849,7 +4055,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
@@ -3881,7 +4088,7 @@ End of document.
     fn test_toc_with_formatted_heading() {
         let md = "# **Bold** and *italic* heading";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3889,7 +4096,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         let toc_builder = result.toc_builder.as_ref().unwrap();
         let entry = &toc_builder.entries()[0];
@@ -3904,7 +4112,7 @@ End of document.
     fn test_build_document_image_with_alt_text() {
         let md = "![This is alt text](image.png)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3912,7 +4120,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         if let Some(DocElement::Image(img)) = result.document.elements.first() {
             assert_eq!(img.alt_text, "This is alt text");
@@ -3929,7 +4138,7 @@ End of document.
         // Block::Image is only created for standalone images (not yet implemented)
         let md = "> Quote with image\n> ![Image](img.png)";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3937,7 +4146,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Parser creates BlockQuote with Paragraphs containing Inline::Image
         // The builder doesn't extract Inline::Image to Block::Image yet
@@ -3955,7 +4165,7 @@ End of document.
     fn test_build_result_structure() {
         let md = "# Test\n\nSome text";
         let parsed = parse_markdown_with_frontmatter(md);
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3963,7 +4173,8 @@ End of document.
             &mut rel_manager,
             None,
             None,
-        );
+        )
+        .unwrap();
 
         // Verify BuildResult structure
         assert!(result.document.elements.len() > 0);
@@ -3972,7 +4183,7 @@ End of document.
 
     #[test]
     fn test_table_with_template() {
-        use crate::template::extract::TableTemplate;
+        use crate::template::extract::table::TableTemplate;
 
         let md = "| Header |\n| --- |\n| Cell |";
         let parsed = parse_markdown_with_frontmatter(md);
@@ -3983,7 +4194,7 @@ End of document.
         template.row_odd.background_color = Some("#00FF00".to_string()); // Green odd row (row 1 in data rows, index 1 in table)
 
         let config = DocumentConfig::default();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -3991,7 +4202,8 @@ End of document.
             &mut rel_manager,
             Some(&template),
             None,
-        );
+        )
+        .unwrap();
 
         // Find the table
         let table = result
@@ -4015,7 +4227,7 @@ End of document.
 
     #[test]
     fn test_first_column_bold_other_columns_normal() {
-        use crate::template::extract::TableTemplate;
+        use crate::template::extract::table::TableTemplate;
 
         // Create a table with 2 columns
         let md = "| Header1 | Header2 |\n| --- | --- |\n| Row1Col1 | Row1Col2 |";
@@ -4033,7 +4245,7 @@ End of document.
         template.header.bold = true; // Keep header bold
 
         let config = DocumentConfig::default();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -4041,7 +4253,8 @@ End of document.
             &mut rel_manager,
             Some(&template),
             None,
-        );
+        )
+        .unwrap();
 
         // Find the table
         let table = result
@@ -4119,7 +4332,7 @@ End of document.
         };
 
         let config = DocumentConfig::default();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &parsed,
             Language::English,
@@ -4127,7 +4340,8 @@ End of document.
             &mut rel_manager,
             Some(&template),
             None,
-        );
+        )
+        .unwrap();
 
         // Find the table
         let table = result
@@ -4177,7 +4391,7 @@ End of document.
         let template = TableTemplate::default();
 
         let config = DocumentConfig::default();
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
         let result = build_document(
             &doc,
             Language::English,
@@ -4185,7 +4399,8 @@ End of document.
             &mut rel_manager,
             Some(&template),
             None,
-        );
+        )
+        .unwrap();
 
         // Should have: Caption paragraph, Table, Empty paragraph
         assert_eq!(result.document.elements.len(), 3);
@@ -4208,10 +4423,10 @@ End of document.
 
         let mut config = DocumentConfig::default();
         config.toc.enabled = false;
-        let mut rel_manager = crate::docx::RelIdManager::new();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
 
         // Mock table template to ensure caption generation
-        let template = crate::template::extract::TableTemplate::default();
+        let template = crate::template::extract::table::TableTemplate::default();
 
         let result = build_document(
             &parsed,
@@ -4220,7 +4435,8 @@ End of document.
             &mut rel_manager,
             Some(&template),
             None,
-        );
+        )
+        .unwrap();
 
         // Find the cross-reference run
         let mut found_ref = false;

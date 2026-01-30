@@ -1,5 +1,7 @@
 # md2docx
 
+![md2docx](docs/assets/md2docx.png)
+
 Markdown to professional DOCX converter with **native Thai language support**, built entirely in Rust.
 
 ## 🚀 Overview

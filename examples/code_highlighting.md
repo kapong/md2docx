@@ -293,7 +293,7 @@ int main() {
 }
 ```
 
-## C#
+## C #
 
 ```cs
 using System;
@@ -621,7 +621,7 @@ See [documentation](https://example.com) for details.
 
 ## Plain Text (no language)
 
-```
+```text
 This is a plain code block without any language specified.
 No syntax highlighting is applied here.
 Lines are displayed in monospace font with the default color.

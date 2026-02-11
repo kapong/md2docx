@@ -1837,7 +1837,7 @@ fn code_block_to_paragraphs(
     if let Some(fname) = filename {
         let filename_para = Paragraph::with_style("CodeFilename")
             .add_text(fname)
-            .spacing(120, 0)
+            .spacing(280, 0)
             .line_spacing(240, "auto");
         paragraphs.push(filename_para);
     }
@@ -1850,8 +1850,8 @@ fn code_block_to_paragraphs(
         let line_num = (i + 1) as u32;
 
         // First line gets spacing before, last line gets spacing after
-        let sp_before = if i == 0 && filename.is_none() { 120 } else { 0 };
-        let sp_after = if i == total_lines - 1 { 120 } else { 0 };
+        let sp_before = if i == 0 && filename.is_none() { 280 } else { 0 };
+        let sp_after = if i == total_lines - 1 { 280 } else { 0 };
 
         let mut p = Paragraph::with_style("Code")
             .spacing(sp_before, sp_after)
@@ -1889,7 +1889,7 @@ fn code_block_to_paragraphs(
         paragraphs.push(
             Paragraph::with_style("Code")
                 .add_text("")
-                .spacing(120, 120)
+                .spacing(280, 280)
                 .line_spacing(240, "auto"),
         );
     }

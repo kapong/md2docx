@@ -1,5 +1,6 @@
 pub(crate) mod builder;
 pub mod image_utils;
+pub(crate) mod math;
 pub(crate) mod ooxml;
 pub(crate) mod packager;
 pub(crate) mod rels_manager;

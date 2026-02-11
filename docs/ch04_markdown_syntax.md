@@ -375,6 +375,55 @@ flowchart LR
 ```
 ```
 
+## Math Equations / สมการคณิตศาสตร์
+
+md2docx supports LaTeX math equations using `$...$` for inline math and `$$...$$` for display (block) math. Equations are converted to Office Math Markup Language (OMML) for native rendering in Word.
+
+md2docx รองรับสมการคณิตศาสตร์ LaTeX โดยใช้ `$...$` สำหรับสมการแบบอินไลน์ และ `$$...$$` สำหรับสมการแบบบล็อก สมการจะถูกแปลงเป็น Office Math Markup Language (OMML) เพื่อแสดงผลแบบเนทีฟใน Word
+
+### Inline Math / สมการแบบอินไลน์
+
+Wrap LaTeX in single dollar signs to insert math inline with text:
+
+ครอบ LaTeX ด้วยเครื่องหมายดอลลาร์เดี่ยวเพื่อแทรกสมการในบรรทัดเดียวกับข้อความ:
+
+```markdown
+The quadratic formula is $x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$ which gives us the roots.
+```
+
+### Display Math / สมการแบบบล็อก
+
+Wrap LaTeX in double dollar signs for centered, standalone equations:
+
+ครอบ LaTeX ด้วยเครื่องหมายดอลลาร์คู่สำหรับสมการที่แสดงเป็นบล็อกตรงกลาง:
+
+```markdown
+$$E = mc^2$$
+
+$$\int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2}$$
+```
+
+### Supported LaTeX Features / ฟีเจอร์ LaTeX ที่รองรับ
+
+The following LaTeX constructs are supported:
+
+ฟีเจอร์ LaTeX ต่อไปนี้ได้รับการรองรับ:
+
+| Feature / ฟีเจอร์ | Example / ตัวอย่าง |
+|---|---|
+| Greek letters / อักษรกรีก | `$\alpha, \beta, \gamma, \pi$` |
+| Fractions / เศษส่วน | `$\frac{a}{b}$` |
+| Superscripts / ยกกำลัง | `$x^2$`, `$e^{i\pi}$` |
+| Subscripts / ตัวห้อย | `$x_i$`, `$a_{n+1}$` |
+| Square roots / รากที่สอง | `$\sqrt{x}$`, `$\sqrt[3]{x}$` |
+| Summation / ผลรวม | `$\sum_{i=1}^{n} x_i$` |
+| Integrals / ปริพันธ์ | `$\int_a^b f(x) dx$` |
+| Products / ผลคูณ | `$\prod_{i=1}^{n} x_i$` |
+| Matrices / เมทริกซ์ | `$\begin{pmatrix} a & b \\ c & d \end{pmatrix}$` |
+| Accents / เครื่องหมายกำกับ | `$\hat{x}$`, `$\bar{y}$`, `$\vec{v}$` |
+| Delimiters / วงเล็บ | `$\left( \frac{a}{b} \right)$` |
+| Functions / ฟังก์ชัน | `$\sin x$`, `$\log_2 n$`, `$\lim_{x \to 0}$` |
+
 ## Summary / สรุป
 
 md2docx supports all common Markdown syntax plus extensions:
@@ -394,6 +443,7 @@ md2docx รองรับไวยากรณ์ Markdown ทั่วไป�
 | Blockquotes / อ้างอิง | `> text` |
 | Footnotes / เชิงอรรถ | `[^1]` |
 | Mermaid / แผนภาพ | `mermaid` code block |
+| Math / สมการ | `$...$` or `$$...$$` |
 
 For more examples, see the example projects in the repository.
 

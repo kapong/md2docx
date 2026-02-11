@@ -89,6 +89,9 @@ pub enum Block {
     /// Raw HTML (preserved but may not render in DOCX)
     Html(String),
 
+    /// Math block (display equation): $$...$$
+    MathBlock { content: String },
+
     /// Include directive: {!include:path.md}
     Include {
         path: String,
@@ -180,6 +183,12 @@ pub enum Inline {
 
     /// Index marker: {index:term}
     IndexMarker(String),
+
+    /// Inline math: $...$
+    InlineMath(String),
+
+    /// Display math (inline context): $$...$$
+    DisplayMath(String),
 }
 
 /// Extract plain text from inline elements
@@ -201,6 +210,7 @@ pub fn extract_inline_text(inlines: &[Inline]) -> String {
             Inline::HardBreak => "\n".to_string(),
             Inline::Html(_) => String::new(),
             Inline::IndexMarker(_) => String::new(),
+            Inline::InlineMath(s) | Inline::DisplayMath(s) => s.clone(),
         })
         .collect::<Vec<_>>()
         .join("")

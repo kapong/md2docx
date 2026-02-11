@@ -1358,10 +1358,17 @@ fn block_to_elements(
         }
 
         // All other blocks just produce paragraphs
-        _ => block_to_paragraphs(block, list_level, ctx, skip_toc)
-            .into_iter()
-            .map(|p| DocElement::Paragraph(Box::new(p)))
-            .collect(),
+        _ => {
+            // Special handling for MathBlock at element level
+            if let Block::MathBlock { content } = block {
+                let omml = crate::docx::math::latex_to_omml_paragraph(content);
+                return vec![DocElement::MathBlock(omml)];
+            }
+            block_to_paragraphs(block, list_level, ctx, skip_toc)
+                .into_iter()
+                .map(|p| DocElement::Paragraph(Box::new(p)))
+                .collect()
+        }
     }
 }
 
@@ -1492,6 +1499,15 @@ fn block_to_paragraphs(
             // Skip images for now - will be handled in Phase 3
             vec![]
         }
+
+        Block::MathBlock { content } => {
+            // Display math: rendered as a centered paragraph with OMML
+            let omml = crate::docx::math::latex_to_omml_paragraph(content);
+            let mut para = Paragraph::new();
+            para.align = Some("center".to_string());
+            para.children.push(ParagraphChild::OfficeMath(omml));
+            vec![para]
+        }
     }
 }
 
@@ -1512,6 +1528,7 @@ fn heading_to_paragraph(level: u8, content: &[Inline], ctx: &mut BuildContext) -
         p = match child {
             ParagraphChild::Run(r) => p.add_run(r),
             ParagraphChild::Hyperlink(h) => p.add_hyperlink(h),
+            ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
         };
     }
     p
@@ -1527,6 +1544,7 @@ fn paragraph_to_paragraph(inlines: &[Inline], ctx: &mut BuildContext) -> Paragra
         p = match child {
             ParagraphChild::Run(r) => p.add_run(r),
             ParagraphChild::Hyperlink(h) => p.add_hyperlink(h),
+            ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
         };
     }
     p
@@ -1709,6 +1727,7 @@ fn create_table_cell_with_template(
                     p.add_run(r)
                 }
                 ParagraphChild::Hyperlink(link) => p.add_hyperlink(link),
+                ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
             };
         }
     } else {
@@ -1722,6 +1741,7 @@ fn create_table_cell_with_template(
                     p.add_run(r)
                 }
                 ParagraphChild::Hyperlink(link) => p.add_hyperlink(link),
+                ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
             };
         }
     }
@@ -2136,6 +2156,17 @@ fn inline_to_children(
         Inline::IndexMarker(_) => {
             // Skip index markers for now - will be handled in Phase 3
             vec![]
+        }
+
+        Inline::InlineMath(latex) => {
+            let omml = crate::docx::math::latex_to_omml_inline(latex);
+            vec![ParagraphChild::OfficeMath(omml)]
+        }
+
+        Inline::DisplayMath(latex) => {
+            // Display math in inline context: use oMathPara
+            let omml = crate::docx::math::latex_to_omml_paragraph(latex);
+            vec![ParagraphChild::OfficeMath(omml)]
         }
     }
 }

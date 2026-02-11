@@ -363,6 +363,8 @@ impl Hyperlink {
 pub(crate) enum ParagraphChild {
     Run(Run),
     Hyperlink(Hyperlink),
+    /// Office Math inline element (raw OMML XML)
+    OfficeMath(String),
 }
 
 /// Paragraph with style and children (runs or hyperlinks)
@@ -457,11 +459,18 @@ impl Paragraph {
         self
     }
 
+    /// Add an office math element to the paragraph
+    pub(crate) fn add_office_math(mut self, xml: String) -> Self {
+        self.children.push(ParagraphChild::OfficeMath(xml));
+        self
+    }
+
     /// Get an iterator over all runs in the paragraph (including those inside hyperlinks)
     pub fn iter_runs(&self) -> impl Iterator<Item = &Run> {
         self.children.iter().filter_map(|child| match child {
             ParagraphChild::Run(run) => Some(run),
             ParagraphChild::Hyperlink(link) => link.children.first(),
+            ParagraphChild::OfficeMath(_) => None,
         })
     }
 
@@ -870,6 +879,10 @@ impl Paragraph {
 
                     writer.write_event(Event::End(BytesEnd::new("w:hyperlink")))?;
                 }
+                ParagraphChild::OfficeMath(xml) => {
+                    // Write raw OMML XML (m:oMath element)
+                    Self::write_raw_math_xml(writer, xml)?;
+                }
             }
         }
 
@@ -883,6 +896,44 @@ impl Paragraph {
         }
 
         writer.write_event(Event::End(BytesEnd::new("w:p")))?;
+        Ok(())
+    }
+
+    /// Write raw OMML XML content (for math elements)
+    fn write_raw_math_xml<W: std::io::Write>(writer: &mut Writer<W>, xml: &str) -> Result<()> {
+        let wrapped = format!("<wrapper>{}</wrapper>", xml);
+        let mut reader = quick_xml::Reader::from_reader(wrapped.as_bytes());
+        reader.config_mut().trim_text_end = false;
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::End(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::Empty(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::Text(e)) => {
+                    writer.write_event(Event::Text(e.to_owned()))?;
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
         Ok(())
     }
 }
@@ -1092,6 +1143,8 @@ pub(crate) enum DocElement {
     Table(Table),
     Image(ImageElement),
     RawXml(String), // Raw XML content (e.g. from cover template)
+    /// Display math block (raw OMML paragraph XML)
+    MathBlock(String),
 }
 
 /// Table width type
@@ -1382,6 +1435,10 @@ impl DocumentXml {
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ));
         doc.push_attribute((
+            "xmlns:m",
+            "http://schemas.openxmlformats.org/officeDocument/2006/math",
+        ));
+        doc.push_attribute((
             "xmlns:r",
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
         ));
@@ -1494,6 +1551,18 @@ impl DocumentXml {
                 DocElement::RawXml(xml) => {
                     self.write_raw_xml(&mut writer, xml)?;
                 }
+                DocElement::MathBlock(xml) => {
+                    // Display math: wrap in w:p containing m:oMathPara
+                    writer.write_event(Event::Start(BytesStart::new("w:p")))?;
+                    // Add paragraph properties for centered math
+                    writer.write_event(Event::Start(BytesStart::new("w:pPr")))?;
+                    let mut jc = BytesStart::new("w:jc");
+                    jc.push_attribute(("w:val", "center"));
+                    writer.write_event(Event::Empty(jc))?;
+                    writer.write_event(Event::End(BytesEnd::new("w:pPr")))?;
+                    self.write_raw_xml_inline(&mut writer, xml)?;
+                    writer.write_event(Event::End(BytesEnd::new("w:p")))?;
+                }
             }
         }
 
@@ -1547,6 +1616,44 @@ impl DocumentXml {
             buf.clear();
         }
 
+        Ok(())
+    }
+
+    /// Write raw XML content inline (for math elements inside paragraphs)
+    fn write_raw_xml_inline<W: std::io::Write>(&self, writer: &mut Writer<W>, xml: &str) -> Result<()> {
+        let wrapped = format!("<wrapper>{}</wrapper>", xml);
+        let mut reader = quick_xml::Reader::from_reader(wrapped.as_bytes());
+        reader.config_mut().trim_text_end = false;
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::End(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::Empty(e)) => {
+                    let name = std::str::from_utf8(e.name().into_inner()).unwrap_or("");
+                    if name != "wrapper" {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                }
+                Ok(Event::Text(e)) => {
+                    writer.write_event(Event::Text(e.to_owned()))?;
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
         Ok(())
     }
 

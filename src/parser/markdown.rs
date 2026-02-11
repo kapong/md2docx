@@ -712,6 +712,57 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                 }
             }
 
+            Event::InlineMath(math) => {
+                let math = math.to_string();
+                if let Some(table) = table_builder.as_mut() {
+                    if !inline_stack.is_empty() {
+                        if let Some(builder) = inline_stack.last_mut() {
+                            builder.add_text(math);
+                        }
+                    } else {
+                        table.current_cell.push(Inline::InlineMath(math));
+                    }
+                } else if !list_stack.is_empty() {
+                    if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                        current_inlines.push(Inline::InlineMath(math));
+                    } else if inline_stack.is_empty() {
+                        list_item_inlines.push(Inline::InlineMath(math));
+                    } else {
+                        if let Some(builder) = inline_stack.last_mut() {
+                            builder.add_text(math);
+                        }
+                    }
+                } else if let Some(block) = current_block.as_mut() {
+                    match block {
+                        BlockBuilder::Heading { .. } | BlockBuilder::Paragraph(_) => {
+                            current_inlines.push(Inline::InlineMath(math));
+                        }
+                        _ => {}
+                    }
+                } else if footnote_builder.is_some() || !block_stack.is_empty() {
+                    current_inlines.push(Inline::InlineMath(math));
+                }
+            }
+
+            Event::DisplayMath(math) => {
+                let math = math.to_string();
+                // Display math becomes a block-level math element
+                finish_current_block_with_footnote(
+                    &mut current_block,
+                    &mut blocks,
+                    &mut footnote_builder,
+                    &mut list_stack,
+                    &mut block_stack,
+                );
+                add_block_to_correct_stack(
+                    &mut blocks,
+                    &mut footnote_builder,
+                    &mut list_stack,
+                    &mut block_stack,
+                    Block::MathBlock { content: math },
+                );
+            }
+
             Event::SoftBreak => {
                 if let Some(table) = table_builder.as_mut() {
                     if !inline_stack.is_empty() {
@@ -1176,6 +1227,7 @@ fn get_parser_options() -> Options {
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_MATH);
     options
 }
 

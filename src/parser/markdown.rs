@@ -542,7 +542,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Emphasis => {
                         if let Some(InlineBuilder::Italic(content)) = inline_stack.pop() {
-                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                            if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(Inline::Italic(content));
+                            } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Italic(content));
                             } else {
                                 add_inline(&mut current_inlines, Inline::Italic(content));
@@ -551,7 +553,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Strong => {
                         if let Some(InlineBuilder::Bold(content)) = inline_stack.pop() {
-                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                            if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(Inline::Bold(content));
+                            } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Bold(content));
                             } else {
                                 add_inline(&mut current_inlines, Inline::Bold(content));
@@ -560,7 +564,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Strikethrough => {
                         if let Some(InlineBuilder::Strikethrough(content)) = inline_stack.pop() {
-                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                            if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(Inline::Strikethrough(content));
+                            } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Strikethrough(content));
                             } else {
                                 add_inline(&mut current_inlines, Inline::Strikethrough(content));
@@ -569,7 +575,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Link => {
                         if let Some(InlineBuilder::Link { text, url, title }) = inline_stack.pop() {
-                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                            if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(Inline::Link { text, url, title });
+                            } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Link { text, url, title });
                             } else {
                                 add_inline(&mut current_inlines, Inline::Link { text, url, title });
@@ -578,7 +586,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Image => {
                         if let Some(InlineBuilder::Image { alt, src, title }) = inline_stack.pop() {
-                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                            if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(Inline::Image { alt, src, title });
+                            } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Image { alt, src, title });
                             } else {
                                 add_inline(&mut current_inlines, Inline::Image { alt, src, title });
@@ -604,7 +614,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
             Event::Text(text) => {
                 let text = text.to_string();
                 if let Some(table) = table_builder.as_mut() {
-                    table.current_cell.push(Inline::Text(text));
+                    // Route through inline_stack so text inside links/bold/italic
+                    // ends up in the correct inline builder, not as bare text
+                    add_text_to_inline_stack(&mut inline_stack, &mut table.current_cell, text);
                 } else if !list_stack.is_empty() {
                     // Handle text inside list items
                     // When inside a paragraph/heading block (loose list items with nested content),
@@ -637,7 +649,13 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
             Event::Code(code) => {
                 let code = code.to_string();
                 if let Some(table) = table_builder.as_mut() {
-                    table.current_cell.push(Inline::Code(code));
+                    if !inline_stack.is_empty() {
+                        if let Some(builder) = inline_stack.last_mut() {
+                            builder.add_text(code);
+                        }
+                    } else {
+                        table.current_cell.push(Inline::Code(code));
+                    }
                 } else if !list_stack.is_empty() {
                     // Handle code inside list items
                     if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
@@ -696,7 +714,13 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
 
             Event::SoftBreak => {
                 if let Some(table) = table_builder.as_mut() {
-                    table.current_cell.push(Inline::SoftBreak);
+                    if !inline_stack.is_empty() {
+                        if let Some(builder) = inline_stack.last_mut() {
+                            builder.add_text(" ".to_string());
+                        }
+                    } else {
+                        table.current_cell.push(Inline::SoftBreak);
+                    }
                 } else if !list_stack.is_empty() {
                     // Soft break becomes a space in list items
                     if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
@@ -732,7 +756,13 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
             }
             Event::HardBreak => {
                 if let Some(table) = table_builder.as_mut() {
-                    table.current_cell.push(Inline::HardBreak);
+                    if !inline_stack.is_empty() {
+                        if let Some(builder) = inline_stack.last_mut() {
+                            builder.add_text(" ".to_string());
+                        }
+                    } else {
+                        table.current_cell.push(Inline::HardBreak);
+                    }
                 } else if !list_stack.is_empty() {
                     // Hard break in list items
                     if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {

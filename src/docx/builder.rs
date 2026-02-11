@@ -2001,10 +2001,10 @@ fn inline_to_children(
         }
 
         Inline::Link { text, url, .. } => {
-            // Check for PAGEREF pattern: [{PAGNUM}](#bookmark)
+            // Check for PAGEREF pattern: [{PAGENUM}](#bookmark)
             if url.starts_with('#') {
                 let link_text = extract_inline_text(text);
-                if link_text.contains("{PAGNUM}") {
+                if link_text.contains("{PAGENUM}") {
                     let bookmark = &url[1..]; // Strip the '#'
                     // Generate a PAGEREF field: begin + instrText + separate + placeholder + end
                     let mut children = Vec::new();

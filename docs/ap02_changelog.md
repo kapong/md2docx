@@ -12,7 +12,8 @@ This appendix documents the version history and changes made to md2docx.
 
 ### New Features / ฟีเจอร์ใหม่
 
-- Added `[{PAGNUM}](#bookmark)` syntax to insert Word PAGEREF field that resolves to the page number of the referenced heading/anchor
+- Added `[{PAGENUM}](#bookmark)` syntax to insert Word PAGEREF field that resolves to the page number of the referenced heading/anchor
+- Fixed cross-references and PAGEREF not working inside table cells
 
 ### Bug Fixes / การแก้ไขข้อบกพร่อง
 

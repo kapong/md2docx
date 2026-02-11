@@ -233,16 +233,20 @@ This is a **bold** paragraph.
 
 ## Code Example
 
+```
+
 ```rust
 fn main() {
     println!("Hello!");
 }
 ```
+
 "#;
 
 let docx_bytes = Document::from_markdown(markdown)?;
 std::fs::write("output.docx", docx_bytes)?;
-```
+
+```text
 
 ### from_file / จากไฟล์
 
@@ -320,20 +324,20 @@ let docx_bytes = Document::builder()
     .author("Engineering Team")
     .date("2024-01-15")
     .language(Language::English)
-    
+
     // Content
     .add_markdown("# Introduction\n\nWelcome to the API.")
     .add_markdown("## Authentication\n\nUse API keys.")
     .add_file("endpoints.md")?
-    
+
     // Template
     .template(Template::from_file("template.docx")?)
-    
+
     // Options
     .toc(true)
     .toc_depth(3)
     .page_numbers(true)
-    
+
     // Build
     .build()?;
 ```
@@ -367,13 +371,13 @@ use std::fs;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read markdown
     let markdown = fs::read_to_string("README.md")?;
-    
+
     // Convert to DOCX
     let docx_bytes = Document::from_markdown(&markdown)?;
-    
+
     // Write output
     fs::write("README.docx", docx_bytes)?;
-    
+
     println!("Converted README.md to README.docx");
     Ok(())
 }
@@ -400,16 +404,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enabled(true)
             .skip_cover(true))
         .build()?;
-    
+
     // Build from directory
     let docx_bytes = Document::from_directory(
         Path::new("./docs/"),
         config
     )?;
-    
+
     // Save output
     std::fs::write("manual.docx", docx_bytes)?;
-    
+
     println!("Documentation built successfully!");
     Ok(())
 }
@@ -424,7 +428,7 @@ use std::path::Path;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load and validate template
     let template = Template::from_file(Path::new("company-template.docx"))?;
-    
+
     let report = template.validate()?;
     if !report.is_valid() {
         eprintln!("Template validation failed!");
@@ -433,7 +437,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Err("Invalid template".into());
     }
-    
+
     // Build document with template
     let docx_bytes = Document::builder()
         .title("Annual Report")
@@ -444,10 +448,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .toc(true)
         .page_numbers(true)
         .build()?;
-    
+
     std::fs::write("report.docx", docx_bytes)?;
     println!("Report generated with custom template!");
-    
+
     Ok(())
 }
 ```
@@ -475,7 +479,7 @@ fn convert_document(input: &Path, output: &Path) -> Result<(), Error> {
             return Err(e);
         }
     };
-    
+
     // Write output with error handling
     match std::fs::write(output, docx_bytes) {
         Ok(_) => {

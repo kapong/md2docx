@@ -71,7 +71,7 @@ Styles inherit from parent styles:
 
 สไตล์สืบทอดจากสไตล์หลัก:
 
-```
+```text
 Normal
 ├── Heading1 (based on Normal)
 │   ├── Heading2
@@ -102,7 +102,7 @@ For advanced customization, you can organize templates in a directory structure.
 
 ### Directory Layout / โครงสร้างไดเรกทอรี
 
-```
+```text
 templates/
 └── my-company-template/
     ├── styles.docx         # Core styles (required) / สไตล์หลัก (จำเป็น)
@@ -123,12 +123,14 @@ Contains all paragraph and character styles. This is the minimum required file.
 #### cover.docx (Optional)
 
 Defines the cover page layout including:
+
 - Background colors/images
 - Title positioning
 - Logo placement
 - Date/author formatting
 
 กำหนดเค้าโครงหน้าปกรวมถึง:
+
 - สีพื้นหลัง/รูปภาพ
 - ตำแหน่งชื่อเรื่อง
 - ตำแหน่งโลโก้
@@ -137,11 +139,13 @@ Defines the cover page layout including:
 #### header-footer.docx (Optional)
 
 Defines header and footer content:
+
 - Page numbering style
 - Running headers (chapter names)
 - Company branding in headers
 
 กำหนดเนื้อหาส่วนหัวและส่วนท้าย:
+
 - รูปแบบหมายเลขหน้า
 - ส่วนหัววิ่ง (ชื่อบท)
 - แบรนด์บริษัทในส่วนหัว
@@ -149,11 +153,13 @@ Defines header and footer content:
 #### image.docx (Optional)
 
 Defines image styling:
+
 - Default image size
 - Border styles
 - Caption formatting
 
 กำหนดการจัดรูปแบบรูปภาพ:
+
 - ขนาดรูปภาพเริ่มต้น
 - รูปแบบเส้นขอบ
 - การจัดรูปแบบคำบรรยาย
@@ -161,11 +167,13 @@ Defines image styling:
 #### table.docx (Optional)
 
 Defines table styling:
+
 - Header row formatting
 - Border styles
 - Cell padding
 
 กำหนดการจัดรูปแบบตาราง:
+
 - การจัดรูปแบบแถวหัวตาราง
 - รูปแบบเส้นขอบ
 - ระยะห่างในเซลล์
@@ -200,18 +208,22 @@ Open your template DOCX file in Word.
 #### 2. Access the Styles Pane / เข้าถึงบานหน้าต่าง Styles
 
 **Word for Windows:**
+
 - Home tab → Styles group → click small arrow (bottom-right)
 - Or press `Alt+Ctrl+Shift+S`
 
 **Word for Mac:**
+
 - Home tab → Styles pane → click expand button
 - Or press `Command+Option+Shift+S`
 
 **Word สำหรับ Windows:**
+
 - แท็บ Home → กลุ่ม Styles → คลิกลูกศรเล็ก (มุมขวาล่าง)
 - หรือกด `Alt+Ctrl+Shift+S`
 
 **Word สำหรับ Mac:**
+
 - แท็บ Home → บานหน้าต่าง Styles → คลิกปุ่มขยาย
 - หรือกด `Command+Option+Shift+S`
 
@@ -238,13 +250,13 @@ Open your template DOCX file in Word.
 
 **Change Heading Colors / เปลี่ยนสีหัวข้อ:**
 
-```
+```text
 Modify "Heading 1" → Font color → Custom → #1F4E79 (dark blue)
 ```
 
 **Add Company Logo to Header / เพิ่มโลโก้บริษัทในส่วนหัว:**
 
-```
+```text
 Insert → Header → Edit Header
 Insert → Pictures → Select logo
 Position and resize
@@ -252,19 +264,19 @@ Position and resize
 
 **Set Default Thai Font / ตั้งค่าฟอนต์ไทยเริ่มต้น:**
 
-```
+```text
 Modify "Normal" → Font → TH Sarabun New → Size 14
 ```
 
 **Adjust Code Block Spacing / ปรับระยะห่างบล็อกโค้ด:**
 
-```
+```text
 Modify "Code" → Paragraph → Before: 6pt, After: 6pt
 ```
 
 #### 5. Save the Template / บันทึกแม่แบบ
 
-```
+```text
 File → Save (or Ctrl+S / Cmd+S)
 ```
 
@@ -324,7 +336,7 @@ Use semantic versioning for templates:
 
 ใช้การกำหนดเวอร์ชันแบบ semantic สำหรับแม่แบบ:
 
-```
+```text
 templates/
 ├── company-template-v1.0.docx
 ├── company-template-v1.1.docx
@@ -370,7 +382,7 @@ Organize templates by purpose:
 
 จัดระเบียบแม่แบบตามวัตถุประสงค์:
 
-```
+```text
 templates/
 ├── internal/
 │   ├── memo-template.docx

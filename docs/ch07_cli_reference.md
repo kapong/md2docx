@@ -249,18 +249,21 @@ md2docx build -d ./docs/ -o output.docx --language en
 ### Shell Configuration / การตั้งค่า Shell
 
 **Bash (~/.bashrc):**
+
 ```bash
 export MD2DOCX_TEMPLATE="$HOME/templates/company.docx"
 export MD2DOCX_LANGUAGE="en"
 ```
 
 **Zsh (~/.zshrc):**
+
 ```zsh
 export MD2DOCX_TEMPLATE="$HOME/templates/company.docx"
 export MD2DOCX_LANGUAGE="en"
 ```
 
 **Fish (~/.config/fish/config.fish):**
+
 ```fish
 set -x MD2DOCX_TEMPLATE "$HOME/templates/company.docx"
 set -x MD2DOCX_LANGUAGE "en"
@@ -294,6 +297,7 @@ md2docx ส่งคืนรหัสออกเฉพาะเพื่อบ
 ### Using Exit Codes in Scripts / การใช้รหัสออกในสคริปต์
 
 **Bash:**
+
 ```bash
 md2docx build -d ./docs/ -o output.docx
 case $? in
@@ -316,6 +320,7 @@ esac
 ```
 
 **Make:**
+
 ```makefile
 build:
 	@md2docx build -d ./docs/ -o output.docx || \

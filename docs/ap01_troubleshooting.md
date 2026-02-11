@@ -39,6 +39,7 @@ md2docx dump-template -o thai-template.docx --lang th
 **Step 2:** Verify font in template - Open template in Word, modify "Normal" style, check Latin font is Calibri and Complex script font is TH Sarabun New.
 
 **Step 3:** Install Thai fonts:
+
 - Windows: TH Sarabun New is pre-installed on Thai Windows
 - macOS: Download from f0nt.com
 - Linux: `sudo apt-get install fonts-thai-tlwg`
@@ -179,7 +180,7 @@ base_path = "/absolute/path/to/assets"
 
 #### Symptom / อาการ
 
-```
+```text
 Template validation failed
 Missing required styles:
   - Code
@@ -297,11 +298,11 @@ theme = "default"
 
 **Step 2:** Verify mermaid syntax:
 
-```markdown
+````markdown
 ```mermaid
 flowchart TD
     A[Start] --> B[End]
-```
+````
 
 **Step 3:** Clear cache:
 
@@ -311,11 +312,11 @@ rm -rf .md2docx-cache/mermaid/
 
 **Step 4:** Test with simple diagram:
 
-```markdown
+````markdown
 ```mermaid
 graph LR
     A --> B
-```
+````
 
 **Step 5:** Check for Thai text (known limitation) - Thai characters in mermaid diagrams currently fail. Use English labels only for now.
 
@@ -359,17 +360,18 @@ graph LR
 
 **Step 3:** For continued lists after code blocks:
 
-```markdown
+````markdown
 1. Item one
 2. Item two
 
    ```rust
    // Some code
-   ```
+   ````
 
 3. Item three (continues)
 4. Item four
-```
+
+```text
 
 ---
 
@@ -474,12 +476,12 @@ Or use a `cover.docx` template with placeholders.
 
 **A:** Yes! Use mermaid code blocks. Note: Thai text in diagrams currently has issues (upstream bug).
 
-```markdown
+````markdown
 ```mermaid
 flowchart TD
     A[Start] --> B[Process]
     B --> C[End]
-```
+````
 
 ใช่! ใช้บล็อกโค้ด mermaid หมายเหตุ: ข้อความภาษาไทยในแผนผังมีปัญหาในขณะนี้
 
@@ -532,7 +534,7 @@ Report bugs and request features on GitHub.
 
 รายงานข้อบกพร่องและขอฟีเจอร์บน GitHub
 
-**Repository:** `https://github.com/pongpanich/md2docx`
+**Repository:** `https://github.com/kapong/md2docx`
 
 ### What to Include When Reporting Bugs / ข้อมูลที่ควรรวมเมื่อรายงานข้อบกพร่อง
 
@@ -582,12 +584,12 @@ md2docx build -i test.md -o test.docx --template my.docx
 
 **Workaround:** Use English labels in diagrams:
 
-```markdown
+````markdown
 ```mermaid
 flowchart TD
     A[Start] --> B[Process]
     B --> C[End]
-```
+````
 
 ### Template Style Application / การใช้สไตล์แม่แบบ
 

@@ -30,3 +30,5 @@ temp/
 
 # Development notes (exclude from public release)
 plan.md
+
+debug/

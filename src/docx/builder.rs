@@ -1461,7 +1461,12 @@ fn block_to_paragraphs(
             )
         }
 
-        Block::ThematicBreak => vec![thematic_break_to_paragraph()],
+        Block::ThematicBreak => {
+            // Insert a blank Normal paragraph before the section break
+            let blank = Paragraph::with_style("Normal").spacing(0, 0).line_spacing(240, "auto");
+            let section = thematic_break_to_paragraph();
+            vec![blank, section]
+        }
 
         Block::Html(_) => {
             // Skip HTML blocks for now
@@ -1591,17 +1596,8 @@ fn table_to_docx(
         max_row_chars = max_row_chars.max(row_len);
     }
 
-    // Determine Mode
-    let (table_width, cell_width) = if max_row_chars > 60 || col_count > 5 {
-        // Wide Mode: 100% width
-        (
-            TableWidth::Pct(5000),
-            TableWidth::Pct(5000 / col_count.max(1) as u32),
-        )
-    } else {
-        // Narrow Mode: Auto width
-        (TableWidth::Auto, TableWidth::Auto)
-    };
+    // Always use auto width (autofit to contents)
+    let (table_width, cell_width) = (TableWidth::Auto, TableWidth::Auto);
 
     table = table.width(table_width);
 
@@ -2132,10 +2128,44 @@ fn inline_to_children(
                 }
 
                 if !content.is_empty() {
+                    // Remove empty trailing paragraphs from footnote content
+                    while content.len() > 1
+                        && content.last().map_or(false, |p| p.children.is_empty())
+                    {
+                        content.pop();
+                    }
+
+                    // Set FootnoteText style on all paragraphs and remove indentation
+                    for p in &mut content {
+                        p.style_id = Some("FootnoteText".to_string());
+                        p.indent_left = None;
+                        p.spacing_before = Some(0);
+                        p.spacing_after = Some(0);
+                    }
+
+                    // Add footnoteRef marker at the beginning of first paragraph
+                    // This generates the footnote number in the footnote content area
+                    let mut fn_ref_run = Run::new("");
+                    fn_ref_run.style = Some("FootnoteReference".to_string());
+                    fn_ref_run.superscript = true;
+                    fn_ref_run.footnote_ref = true;
+
+                    let space_run = Run::new(" ");
+
+                    // Insert footnoteRef run + space at the beginning of first paragraph
+                    content[0]
+                        .children
+                        .insert(0, ParagraphChild::Run(space_run));
+                    content[0]
+                        .children
+                        .insert(0, ParagraphChild::Run(fn_ref_run));
+
                     let id = ctx.footnotes.add_footnote(content);
-                    // Return a run with footnote reference
+                    // Return a run with footnote reference (superscript in body text)
                     let mut run = Run::new("");
                     run.footnote_id = Some(id);
+                    run.style = Some("FootnoteReference".to_string());
+                    run.superscript = true;
                     vec![ParagraphChild::Run(run)]
                 } else {
                     vec![]

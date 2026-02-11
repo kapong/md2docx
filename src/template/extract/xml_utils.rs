@@ -56,13 +56,14 @@ pub fn extract_run_properties(
         .or_else(|| extract_attribute(rpr_content, "w:cs="))
         .unwrap_or_else(|| defaults.font_family.to_string());
 
-    // Extract font size (w:sz or w:szCs for complex script)
-    let font_size = extract_attribute(rpr_content, "w:val=")
+    // Extract font size — look for <w:sz w:val="..."/> first, then <w:szCs w:val="..."/>
+    let font_size = extract_element_val(rpr_content, "<w:sz ")
+        .or_else(|| extract_element_val(rpr_content, "<w:szCs "))
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(defaults.font_size);
 
-    // Extract font color
-    let font_color = extract_attribute(rpr_content, "w:val=")
+    // Extract font color — look specifically for <w:color w:val="..."/>
+    let font_color = extract_element_val(rpr_content, "<w:color ")
         .map(|c| {
             if c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()) {
                 format!("#{}", c)
@@ -121,6 +122,28 @@ pub fn extract_attribute(xml: &str, attr_name: &str) -> Option<String> {
     None
 }
 
+/// Extract the w:val attribute from a specific XML element
+///
+/// Unlike `extract_attribute`, this first locates the element by its tag prefix
+/// (e.g., `<w:sz `) and then extracts the `w:val` attribute from that element only.
+///
+/// # Example
+/// ```ignore
+/// let xml = r#"<w:color w:val="FFFFFF"/><w:szCs w:val="24"/>"#;
+/// assert_eq!(extract_element_val(xml, "<w:szCs "), Some("24".to_string()));
+/// ```
+pub fn extract_element_val(xml: &str, element_prefix: &str) -> Option<String> {
+    if let Some(elem_pos) = xml.find(element_prefix) {
+        // Find the end of this element (/>  or >)
+        let elem_rest = &xml[elem_pos..];
+        let elem_end = elem_rest.find("/>").or_else(|| elem_rest.find('>'))?;
+        let elem_str = &elem_rest[..elem_end];
+        extract_attribute(elem_str, "w:val=")
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +170,33 @@ mod tests {
         assert_eq!(
             extract_attribute(xml, "w:hAnsi="),
             Some("Arial".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_element_val() {
+        let xml = r#"<w:color w:val="FFFFFF" w:themeColor="background1"/><w:szCs w:val="24"/>"#;
+        assert_eq!(
+            extract_element_val(xml, "<w:szCs "),
+            Some("24".to_string())
+        );
+        assert_eq!(
+            extract_element_val(xml, "<w:color "),
+            Some("FFFFFF".to_string())
+        );
+        assert_eq!(extract_element_val(xml, "<w:sz "), None);
+    }
+
+    #[test]
+    fn test_extract_element_val_sz_before_szcs() {
+        let xml = r#"<w:sz w:val="28"/><w:szCs w:val="24"/>"#;
+        assert_eq!(
+            extract_element_val(xml, "<w:sz "),
+            Some("28".to_string())
+        );
+        assert_eq!(
+            extract_element_val(xml, "<w:szCs "),
+            Some("24".to_string())
         );
     }
 }

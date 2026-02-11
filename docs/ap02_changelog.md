@@ -315,7 +315,7 @@ We welcome contributions! Please see the GitHub repository for bug reports, feat
 
 เรายินดีรับการมีส่วนร่วม! กรุณาดูที่ GitHub repository สำหรับรายงานข้อบกพร่อง ขอฟีเจอร์ pull requests และปรับปรุงเอกสาร
 
-**Repository:** `https://github.com/pongpanich/md2docx`
+**Repository:** `https://github.com/kapong/md2docx`
 
 ---
 
@@ -325,7 +325,7 @@ md2docx is released under the **MIT License**.
 
 md2docx เผยแพร่ภายใต้ **MIT License**
 
-```
+```text
 MIT License
 
 Copyright (c) 2026 P. Phienphanich

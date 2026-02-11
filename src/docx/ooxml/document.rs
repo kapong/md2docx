@@ -5,7 +5,7 @@ use quick_xml::Writer;
 use std::io::Cursor;
 
 use crate::error::Result;
-use crate::i18n::detection::detect_language;
+use crate::i18n::detection::{contains_thai, detect_language};
 use crate::template::extract::table::{BorderStyle, BorderStyles, CellMargins};
 
 /// Header and footer references for a section
@@ -31,6 +31,8 @@ pub struct Run {
     pub size: Option<u32>,         // Size in half-points
     pub color: Option<String>,     // Hex color (without #)
     pub highlight: Option<String>, // Highlight color
+    pub superscript: bool,        // Vertical alignment superscript
+    pub footnote_ref: bool,        // If true, emit <w:footnoteRef/> (for footnote content numbering)
     pub preserve_space: bool,
     pub footnote_id: Option<i32>, // Footnote reference ID (if this is a footnote reference)
     pub field_char: Option<String>, // Field character type: "begin", "separate", "end"
@@ -56,6 +58,8 @@ impl Run {
             size: None,
             color: None,
             highlight: None,
+            superscript: false,
+            footnote_ref: false,
             preserve_space: true,
             footnote_id: None,
             field_char: None,
@@ -154,6 +158,9 @@ impl Run {
     pub fn write_xml<W: std::io::Write>(&self, writer: &mut Writer<W>) -> Result<()> {
         writer.write_event(Event::Start(BytesStart::new("w:r")))?;
 
+        // Detect if text contains Thai characters for Complex Script handling
+        let is_complex_script = contains_thai(&self.text);
+
         // Run properties
         if self.bold
             || self.italic
@@ -164,7 +171,9 @@ impl Run {
             || self.size.is_some()
             || self.color.is_some()
             || self.highlight.is_some()
+            || self.superscript
             || self.footnote_id.is_some()
+            || is_complex_script
         {
             writer.write_event(Event::Start(BytesStart::new("w:rPr")))?;
 
@@ -195,6 +204,15 @@ impl Run {
                 fonts.push_attribute(("w:ascii", font.as_str()));
                 fonts.push_attribute(("w:hAnsi", font.as_str()));
                 fonts.push_attribute(("w:cs", font.as_str()));
+                if is_complex_script {
+                    fonts.push_attribute(("w:hint", "cs"));
+                }
+                writer.write_event(Event::Empty(fonts))?;
+            } else if is_complex_script {
+                // Even without an explicit font, emit w:rFonts with w:hint="cs"
+                // so Word uses the Complex Script font slot for Thai text
+                let mut fonts = BytesStart::new("w:rFonts");
+                fonts.push_attribute(("w:hint", "cs"));
                 writer.write_event(Event::Empty(fonts))?;
             }
 
@@ -206,6 +224,11 @@ impl Run {
             // 4. Italic
             if self.italic {
                 writer.write_event(Event::Empty(BytesStart::new("w:i")))?;
+            }
+
+            // 4b. Complex Script flag (w:cs) - enables Thai word-break/wrapping
+            if is_complex_script {
+                writer.write_event(Event::Empty(BytesStart::new("w:cs")))?;
             }
 
             // 5. Strikethrough
@@ -246,6 +269,13 @@ impl Run {
                 let mut h = BytesStart::new("w:highlight");
                 h.push_attribute(("w:val", highlight.as_str()));
                 writer.write_event(Event::Empty(h))?;
+            }
+
+            // 10b. Vertical alignment (superscript for footnote references)
+            if self.superscript {
+                let mut va = BytesStart::new("w:vertAlign");
+                va.push_attribute(("w:val", "superscript"));
+                writer.write_event(Event::Empty(va))?;
             }
 
             // 11. Language setting - use auto-detected language for proper spell-checking
@@ -299,6 +329,11 @@ impl Run {
                 br.push_attribute(("w:type", break_type.as_str()));
             }
             writer.write_event(Event::Empty(br))?;
+        }
+
+        // Footnote reference marker (inside footnote content - generates the number)
+        if self.footnote_ref {
+            writer.write_event(Event::Empty(BytesStart::new("w:footnoteRef")))?;
         }
 
         // Footnote reference (if present)
@@ -1828,6 +1863,11 @@ impl DocumentXml {
             }
         }
         writer.write_event(Event::Empty(tbl_w))?;
+
+        // Table layout: autofit to content
+        let mut tbl_layout = BytesStart::new("w:tblLayout");
+        tbl_layout.push_attribute(("w:type", "autofit"));
+        writer.write_event(Event::Empty(tbl_layout))?;
 
         // Table cell margins (padding)
         writer.write_event(Event::Start(BytesStart::new("w:tblCellMar")))?;

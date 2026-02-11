@@ -6,14 +6,14 @@ class Md2docx < Formula
   if OS.mac?
     if Hardware::CPU.arm?
       url "https://github.com/kapong/md2docx/releases/download/v#{version}/md2docx-darwin-arm64"
-      sha256 "f7ef91fc2ea8dd94f6006fd3afb0dce141d55ba6f4c8074206ab44985855eda8"
+      sha256 "8f777968229f4e647f8941c0635a500f347f41e0d47ba45e5f362a5096fb2033"
     else
       url "https://github.com/kapong/md2docx/releases/download/v#{version}/md2docx-darwin-x86_64"
-      sha256 "b1386ecdecec331688c734b17dbeee1746d37b31d29cdb75a4769859f904252b"
+      sha256 "f9dbdbe66b81c972ca2d8487985a5d8c99e1f225ba5a3a39031baf89fe759e44"
     end
   elsif OS.linux?
     url "https://github.com/kapong/md2docx/releases/download/v#{version}/md2docx-linux-x86_64"
-    sha256 "6d505bf6c1cb309291f9a2526e1e8aab265eb88a24f0d49f0373dff4363ff397"
+    sha256 "7f9048e1e4e29254d5b775ff0ef2b2776c70d274d602753577b9ad23fa2c0c2e"
   end
 
   def install

@@ -157,7 +157,19 @@ Check out [Rust][rust-lang] and [Cargo][cargo-docs].
 [rust-lang]: https://www.rust-lang.org
 [cargo-docs]: https://doc.rust-lang.org/cargo/
 
-## Images / รูปภาพ
+### Page Reference Links / ลิงก์อ้างอิงเลขหน้า
+
+Use `[{PAGNUM}](#bookmark-id)` to insert the page number where a heading or anchor is located. Word will resolve this to the actual page number when the document fields are updated.
+
+```markdown
+See page [{PAGNUM}](#images) for image examples.
+ดูรูปภาพในหน้า [{PAGNUM}](#images)
+```
+
+See page [{PAGNUM}](#images) for image examples.
+ดูรูปภาพในหน้า [{PAGNUM}](#images)
+
+## Images / รูปภาพ {#images}
 
 ### Basic Image / รูปภาพพื้นฐาน
 

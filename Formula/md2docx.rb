@@ -1,7 +1,7 @@
 class Md2docx < Formula
   desc "Markdown to professional DOCX converter with native Thai support"
   homepage "https://github.com/kapong/md2docx"
-  version "0.1.2"
+  version "0.1.3"
 
   if OS.mac?
     if Hardware::CPU.arm?

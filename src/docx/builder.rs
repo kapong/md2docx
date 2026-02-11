@@ -1869,18 +1869,24 @@ fn list_to_paragraphs_with_num_id(
     let mut paragraphs = Vec::new();
 
     for item in items.iter() {
+        let mut is_first_block = true;
         // Process the item's content blocks
         for block in &item.content {
             let mut item_paragraphs = block_to_paragraphs(block, list_level + 1, ctx, skip_toc);
 
-            // Apply list styling to the first paragraph of the item
-            if let Some(first_para) = item_paragraphs.first_mut() {
-                first_para.style_id = Some("ListParagraph".to_string());
+            // Apply list styling only to the first paragraph of the first block in the item.
+            // Subsequent blocks (e.g. nested lists) already have their own styling
+            // and should not be overridden with the parent's numbering.
+            if is_first_block {
+                if let Some(first_para) = item_paragraphs.first_mut() {
+                    first_para.style_id = Some("ListParagraph".to_string());
 
-                // Use the provided unique numId for this list
-                let ilvl = list_level as u32;
-                first_para.numbering_id = Some(num_id);
-                first_para.numbering_level = Some(ilvl);
+                    // Use the provided unique numId for this list
+                    let ilvl = list_level as u32;
+                    first_para.numbering_id = Some(num_id);
+                    first_para.numbering_level = Some(ilvl);
+                }
+                is_first_block = false;
             }
 
             paragraphs.extend(item_paragraphs);
@@ -1995,6 +2001,30 @@ fn inline_to_children(
         }
 
         Inline::Link { text, url, .. } => {
+            // Check for PAGEREF pattern: [{PAGNUM}](#bookmark)
+            if url.starts_with('#') {
+                let link_text = extract_inline_text(text);
+                if link_text.contains("{PAGNUM}") {
+                    let bookmark = &url[1..]; // Strip the '#'
+                    // Generate a PAGEREF field: begin + instrText + separate + placeholder + end
+                    let mut children = Vec::new();
+                    children.push(ParagraphChild::Run(
+                        Run::new("").with_field_char("begin"),
+                    ));
+                    children.push(ParagraphChild::Run(
+                        Run::new(format!(" PAGEREF {} \\h ", bookmark)).with_instr_text(),
+                    ));
+                    children.push(ParagraphChild::Run(
+                        Run::new("").with_field_char("separate"),
+                    ));
+                    children.push(ParagraphChild::Run(Run::new("0"))); // Placeholder page number
+                    children.push(ParagraphChild::Run(
+                        Run::new("").with_field_char("end"),
+                    ));
+                    return children;
+                }
+            }
+
             let rel_id = ctx.hyperlink_ctx.add_hyperlink(url, ctx.rel_manager);
             let mut hyperlink = crate::docx::ooxml::Hyperlink::new(rel_id);
 

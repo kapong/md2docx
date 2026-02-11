@@ -105,6 +105,19 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                             &mut list_stack,
                             &mut block_stack,
                         );
+                        // Flush any pending list item inlines to the current (parent) list's
+                        // current item BEFORE pushing the nested list. In tight lists,
+                        // pulldown-cmark doesn't wrap item text in Paragraph, so the parent
+                        // item text is still in list_item_inlines when the nested list starts.
+                        if !list_item_inlines.is_empty() {
+                            if let Some(list) = list_stack.last_mut() {
+                                if let Some(item) = list.items.last_mut() {
+                                    item.content
+                                        .push(Block::Paragraph(list_item_inlines.clone()));
+                                }
+                            }
+                            list_item_inlines = Vec::new();
+                        }
                         let ordered = start_number.is_some();
                         list_stack.push(ListBuilder {
                             ordered,
@@ -529,7 +542,7 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Emphasis => {
                         if let Some(InlineBuilder::Italic(content)) = inline_stack.pop() {
-                            if !list_stack.is_empty() {
+                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Italic(content));
                             } else {
                                 add_inline(&mut current_inlines, Inline::Italic(content));
@@ -538,7 +551,7 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Strong => {
                         if let Some(InlineBuilder::Bold(content)) = inline_stack.pop() {
-                            if !list_stack.is_empty() {
+                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Bold(content));
                             } else {
                                 add_inline(&mut current_inlines, Inline::Bold(content));
@@ -547,7 +560,7 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Strikethrough => {
                         if let Some(InlineBuilder::Strikethrough(content)) = inline_stack.pop() {
-                            if !list_stack.is_empty() {
+                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Strikethrough(content));
                             } else {
                                 add_inline(&mut current_inlines, Inline::Strikethrough(content));
@@ -556,7 +569,7 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Link => {
                         if let Some(InlineBuilder::Link { text, url, title }) = inline_stack.pop() {
-                            if !list_stack.is_empty() {
+                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Link { text, url, title });
                             } else {
                                 add_inline(&mut current_inlines, Inline::Link { text, url, title });
@@ -565,7 +578,7 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Image => {
                         if let Some(InlineBuilder::Image { alt, src, title }) = inline_stack.pop() {
-                            if !list_stack.is_empty() {
+                            if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
                                 list_item_inlines.push(Inline::Image { alt, src, title });
                             } else {
                                 add_inline(&mut current_inlines, Inline::Image { alt, src, title });
@@ -593,8 +606,12 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                 if let Some(table) = table_builder.as_mut() {
                     table.current_cell.push(Inline::Text(text));
                 } else if !list_stack.is_empty() {
-                    // Handle text inside list items - accumulate into list_item_inlines
-                    if inline_stack.is_empty() {
+                    // Handle text inside list items
+                    // When inside a paragraph/heading block (loose list items with nested content),
+                    // route to current_inlines so the paragraph gets proper content ordering
+                    if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                        add_text_to_inline_stack(&mut inline_stack, &mut current_inlines, text);
+                    } else if inline_stack.is_empty() {
                         list_item_inlines.push(Inline::Text(text));
                     } else {
                         add_text_to_inline_stack(&mut inline_stack, &mut list_item_inlines, text);
@@ -623,7 +640,14 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     table.current_cell.push(Inline::Code(code));
                 } else if !list_stack.is_empty() {
                     // Handle code inside list items
-                    if inline_stack.is_empty() {
+                    if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                        add_text_to_inline_stack(&mut inline_stack, &mut current_inlines, code);
+                        if let Some(inline) = current_inlines.last_mut() {
+                            if let Inline::Text(text) = inline {
+                                *inline = Inline::Code(text.clone());
+                            }
+                        }
+                    } else if inline_stack.is_empty() {
                         list_item_inlines.push(Inline::Code(code));
                     } else {
                         add_text_to_inline_stack(
@@ -675,7 +699,11 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     table.current_cell.push(Inline::SoftBreak);
                 } else if !list_stack.is_empty() {
                     // Soft break becomes a space in list items
-                    list_item_inlines.push(Inline::Text(" ".to_string()));
+                    if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                        add_text_to_inline_stack(&mut inline_stack, &mut current_inlines, " ".to_string());
+                    } else {
+                        list_item_inlines.push(Inline::Text(" ".to_string()));
+                    }
                 } else if let Some(block) = current_block.as_mut() {
                     match block {
                         BlockBuilder::Heading { .. } | BlockBuilder::Paragraph(_) => {
@@ -707,7 +735,11 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     table.current_cell.push(Inline::HardBreak);
                 } else if !list_stack.is_empty() {
                     // Hard break in list items
-                    list_item_inlines.push(Inline::HardBreak);
+                    if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                        add_inline(&mut current_inlines, Inline::HardBreak);
+                    } else {
+                        list_item_inlines.push(Inline::HardBreak);
+                    }
                 } else if let Some(block) = current_block.as_mut() {
                     match block {
                         BlockBuilder::Heading { .. } | BlockBuilder::Paragraph(_) => {
@@ -761,7 +793,11 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     table.current_cell.push(Inline::FootnoteRef(name));
                 } else if !list_stack.is_empty() {
                     // Footnote reference inside list items
-                    list_item_inlines.push(Inline::FootnoteRef(name));
+                    if matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
+                        add_inline(&mut current_inlines, Inline::FootnoteRef(name));
+                    } else {
+                        list_item_inlines.push(Inline::FootnoteRef(name));
+                    }
                 } else if let Some(block) = current_block.as_mut() {
                     match block {
                         BlockBuilder::Heading { .. } | BlockBuilder::Paragraph(_) => {

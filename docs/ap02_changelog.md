@@ -6,6 +6,21 @@ This appendix documents the version history and changes made to md2docx.
 
 ---
 
+## Version 0.1.3 (2026-02-11) {#ap02-v013}
+
+**Bug Fix Release / เวอร์ชันแก้ไขข้อบกพร่อง**
+
+### New Features / ฟีเจอร์ใหม่
+
+- Added `[{PAGNUM}](#bookmark)` syntax to insert Word PAGEREF field that resolves to the page number of the referenced heading/anchor
+
+### Bug Fixes / การแก้ไขข้อบกพร่อง
+
+- Fixed multi-level (nested) list rendering — parent item text was lost or replaced by child list items
+- Fixed tight list items with nested content losing parent text when nested list started
+
+---
+
 ## Version 0.1.2 (2026-02-11) {#ap02-v012}
 
 **Feature & Bug Fix Release / เวอร์ชันเพิ่มฟีเจอร์และแก้ไขข้อบกพร่อง**

@@ -6,6 +6,23 @@ This appendix documents the version history and changes made to md2docx.
 
 ---
 
+## Version 0.1.2 (2026-02-11) {#ap02-v012}
+
+**Feature & Bug Fix Release / เวอร์ชันเพิ่มฟีเจอร์และแก้ไขข้อบกพร่อง**
+
+### New Features / ฟีเจอร์ใหม่
+
+- Added first-line indent (0.5 inch) to normal body text paragraphs
+- Header/footer tab stop positions now computed from actual page dimensions instead of hardcoded A4 values
+- Cover template text elements support 5x longer title/subtitle/author values
+- Custom user-defined variables in `[document]` section available as `{{key}}` placeholders in cover templates and output filenames
+
+### Bug Fixes / การแก้ไขข้อบกพร่อง
+
+- Fixed panic when truncating filenames containing multi-byte Thai characters
+
+---
+
 ## Version 0.1.1 (2026-01-30) {#ap02-v011}
 
 **Bug Fix Release / เวอร์ชันแก้ไขข้อบกพร่อง**

@@ -145,7 +145,8 @@ pub struct Style {
     pub outline_level: Option<u8>,   // For headings (0-8)
     pub spacing_before: Option<u32>, // In twips (1/20 pt)
     pub spacing_after: Option<u32>,
-    pub indent_left: Option<u32>, // In twips
+    pub indent_left: Option<u32>,       // In twips
+    pub indent_first_line: Option<u32>, // First-line indent in twips
     pub contextual_spacing: bool, // Ignore spacing between same styles
     pub hidden: bool,
     pub semi_hidden: bool,
@@ -175,6 +176,7 @@ impl Style {
             spacing_before: None,
             spacing_after: None,
             indent_left: None,
+            indent_first_line: None,
             contextual_spacing: false,
             hidden: false,
             semi_hidden: false,
@@ -265,6 +267,12 @@ impl Style {
         self
     }
 
+    /// Set first-line indent in twips
+    pub fn first_line_indent(mut self, first_line: u32) -> Self {
+        self.indent_first_line = Some(first_line);
+        self
+    }
+
     /// Set contextual spacing
     pub fn contextual_spacing(mut self, enabled: bool) -> Self {
         self.contextual_spacing = enabled;
@@ -304,6 +312,12 @@ pub(crate) struct StylesDocument {
     styles: Vec<Style>,
     lang: Language,
     font_config: Option<FontConfig>,
+    /// Page width in twips (for computing header/footer tab positions)
+    page_width: Option<u32>,
+    /// Left margin in twips
+    margin_left: Option<u32>,
+    /// Right margin in twips
+    margin_right: Option<u32>,
 }
 
 impl StylesDocument {
@@ -312,9 +326,41 @@ impl StylesDocument {
             styles: Vec::new(),
             lang,
             font_config,
+            page_width: None,
+            margin_left: None,
+            margin_right: None,
         };
         doc.add_default_styles();
         doc
+    }
+
+    /// Create with page dimensions so header/footer tab stops are computed correctly
+    pub fn with_page_layout(
+        lang: Language,
+        font_config: Option<FontConfig>,
+        page_width: Option<u32>,
+        margin_left: Option<u32>,
+        margin_right: Option<u32>,
+    ) -> Self {
+        let mut doc = Self {
+            styles: Vec::new(),
+            lang,
+            font_config,
+            page_width,
+            margin_left,
+            margin_right,
+        };
+        doc.add_default_styles();
+        doc
+    }
+
+    /// Compute the text area width in twips (page_width - left_margin - right_margin)
+    /// Falls back to A4 defaults: 11906 - 1440 - 1440 = 9026
+    fn text_area_width(&self) -> u32 {
+        let width = self.page_width.unwrap_or(11906); // A4 = 210mm
+        let left = self.margin_left.unwrap_or(1440); // 25.4mm ≈ 1440 twips
+        let right = self.margin_right.unwrap_or(1440);
+        width.saturating_sub(left).saturating_sub(right)
     }
 
     fn get_ascii_font(&self) -> String {
@@ -419,7 +465,8 @@ impl StylesDocument {
             Style::new("BodyText", "Body Text", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .spacing(0, 240), // 12pt after
+                .spacing(0, 240) // 12pt after
+                .first_line_indent(720), // 0.5 inch first-line indent
         );
 
         // Title style (cover page title)
@@ -714,7 +761,10 @@ impl StylesDocument {
         );
 
         // Header style (for header paragraphs)
-        // Tab positions: center at 4513, right at 9026 (for A4 paper)
+        // Tab positions computed from page dimensions (center and right-aligned)
+        let text_width = self.text_area_width();
+        let center_tab = text_width / 2;
+        let right_tab = text_width;
         self.add_style(
             Style::new("Header", "header", StyleType::Paragraph)
                 .ui_priority(99)
@@ -723,12 +773,12 @@ impl StylesDocument {
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .add_tab(TabStop {
-                    position: 4513,
+                    position: center_tab,
                     alignment: "center".to_string(),
                     leader: None,
                 })
                 .add_tab(TabStop {
-                    position: 9026,
+                    position: right_tab,
                     alignment: "right".to_string(),
                     leader: None,
                 }),
@@ -744,12 +794,12 @@ impl StylesDocument {
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .add_tab(TabStop {
-                    position: 4513,
+                    position: center_tab,
                     alignment: "center".to_string(),
                     leader: None,
                 })
                 .add_tab(TabStop {
-                    position: 9026,
+                    position: right_tab,
                     alignment: "right".to_string(),
                     leader: None,
                 }),
@@ -1082,9 +1132,14 @@ impl StylesDocument {
             }
 
             // 9. Indent
-            if let Some(indent) = style.indent_left {
+            if style.indent_left.is_some() || style.indent_first_line.is_some() {
                 let mut indent_elem = BytesStart::new("w:ind");
-                indent_elem.push_attribute(("w:left", indent.to_string().as_str()));
+                if let Some(indent) = style.indent_left {
+                    indent_elem.push_attribute(("w:left", indent.to_string().as_str()));
+                }
+                if let Some(first_line) = style.indent_first_line {
+                    indent_elem.push_attribute(("w:firstLine", first_line.to_string().as_str()));
+                }
                 writer.write_event(Event::Empty(indent_elem))?;
             }
 

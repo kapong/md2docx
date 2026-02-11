@@ -248,6 +248,11 @@ impl ProjectBuilder {
         ctx.set("date", &self.config.document.date);
         ctx.set("version", &self.config.document.version);
 
+        // Pass user-defined extra variables from [document] section
+        for (key, value) in self.config.document.extra_as_strings() {
+            ctx.set(&key, value);
+        }
+
         // Extract inside content from cover.md if using cover template
         if self
             .templates

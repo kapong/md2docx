@@ -579,7 +579,7 @@ fn parse_paragraph_element(p_xml: &str) -> Result<Option<CoverElement>> {
         x: 0,
         y: 0,
         width: 6000000, // Default width in EMUs (~6 inches)
-        height: 200000, // Default height in EMUs
+        height: 1000000, // Default height in EMUs (5x for long text)
         font_family,
         font_size,
         color,
@@ -718,7 +718,7 @@ mod tests {
                 x: 0,
                 y: 0,
                 width: 1000000,
-                height: 200000,
+                height: 1000000,
                 font_family: "Calibri".to_string(),
                 font_size: 48,
                 color: "#000000".to_string(),
@@ -740,7 +740,7 @@ mod tests {
                 x: 0,
                 y: 0,
                 width: 1000000,
-                height: 200000,
+                height: 1000000,
                 font_family: "Calibri".to_string(),
                 font_size: 48,
                 color: "#000000".to_string(),
@@ -753,7 +753,7 @@ mod tests {
                 x: 0,
                 y: 200000,
                 width: 1000000,
-                height: 200000,
+                height: 1000000,
                 font_family: "Calibri".to_string(),
                 font_size: 24,
                 color: "#000000".to_string(),

@@ -452,7 +452,13 @@ pub fn markdown_to_docx_with_templates(
     let mut content_types = ContentTypes::new();
     let rels = Relationships::root_rels();
     let mut doc_rels = Relationships::document_rels();
-    let styles = StylesDocument::new(lang, doc_config.fonts.clone());
+    let styles = StylesDocument::with_page_layout(
+        lang,
+        doc_config.fonts.clone(),
+        doc_config.page.as_ref().and_then(|p| p.width),
+        doc_config.page.as_ref().and_then(|p| p.margin_left),
+        doc_config.page.as_ref().and_then(|p| p.margin_right),
+    );
 
     // Process images from build_result (includes cover template images and markdown images)
     // Header/footer images are handled separately with header_ prefix

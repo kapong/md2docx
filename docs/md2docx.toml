@@ -1,10 +1,11 @@
 [document]
 title = "คู่มือการใช้งาน md2docx"
-subtitle = "Markdown to DOCX Converter / โปแกรมแปลง Markdown เป็น DOCX"
+subtitle = "คู่มือระบบสร้างวิดีโอภาษามืออัตโนมัติสำหรับการถ่ายทอดข้อมูลพยากรณ์อากาศ โดยประยุกต์ใช้แบบจำลองภาษาขนาดใหญ่ (Large Language Model)"
 author = "P. Phienphanich"
 date = "2026-01-30"
 language = "th"
 version = "0.1.1"
+custom_var = "ทดสอบ"
 
 [template]
 dir = "template"

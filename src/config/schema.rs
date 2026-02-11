@@ -4,6 +4,7 @@
 //! and provides methods to load and parse them.
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Top-level project configuration from md2docx.toml
@@ -37,6 +38,10 @@ pub struct DocumentSection {
     pub page_margin_bottom: String,
     pub page_margin_left: String,
     pub page_margin_right: String,
+    /// User-defined custom variables (any extra keys in [document])
+    /// These are available as {{key}} placeholders in cover templates and output filenames.
+    #[serde(flatten)]
+    pub extra: HashMap<String, toml::Value>,
 }
 
 impl Default for DocumentSection {
@@ -54,7 +59,29 @@ impl Default for DocumentSection {
             page_margin_bottom: "25.4mm".to_string(),
             page_margin_left: "25.4mm".to_string(),
             page_margin_right: "25.4mm".to_string(),
+            extra: HashMap::new(),
         }
+    }
+}
+
+impl DocumentSection {
+    /// Get all extra (user-defined) variables as string key-value pairs.
+    /// Non-string TOML values are converted to their display representation.
+    pub fn extra_as_strings(&self) -> HashMap<String, String> {
+        self.extra
+            .iter()
+            .map(|(k, v)| {
+                let s = match v {
+                    toml::Value::String(s) => s.clone(),
+                    toml::Value::Integer(i) => i.to_string(),
+                    toml::Value::Float(f) => f.to_string(),
+                    toml::Value::Boolean(b) => b.to_string(),
+                    toml::Value::Datetime(d) => d.to_string(),
+                    other => other.to_string(),
+                };
+                (k.clone(), s)
+            })
+            .collect()
     }
 }
 
@@ -142,6 +169,12 @@ fn expand_document_placeholders(template: &str, document: &DocumentSection) -> S
         result = result.replace(placeholder, value);
     }
 
+    // Also expand any user-defined extra variables from [document]
+    for (key, value) in document.extra_as_strings() {
+        let placeholder = format!("{{{{{}}}}}", key);
+        result = result.replace(&placeholder, &sanitize_filename(&value));
+    }
+
     result
 }
 
@@ -164,7 +197,12 @@ fn sanitize_filename(input: &str) -> String {
     // Trim whitespace and limit length
     result = result.trim().to_string();
     if result.len() > 100 {
-        result = result[..100].to_string();
+        // Find the nearest char boundary at or before byte 100
+        let mut end = 100;
+        while !result.is_char_boundary(end) {
+            end -= 1;
+        }
+        result = result[..end].to_string();
     }
 
     // If empty after sanitization, return "unknown"

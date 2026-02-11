@@ -165,17 +165,9 @@ This is the first public release of md2docx, a Markdown to DOCX converter with T
 
 **Template extraction** - Extract styles from existing DOCX files for reuse.
 
-**Template validation** - Verify required styles are present before building.
-
-**Template generation** - Create new templates with `dump-template` command.
-
 **Style inheritance** - Apply template styles to generated content automatically.
 
 **การแยกแม่แบบ** - แยกสไตล์จากไฟล์ DOCX ที่มีอยู่เพื่อนำกลับมาใช้
-
-**การตรวจสอบแม่แบบ** - ตรวจสอบว่ามีสไตล์ที่จำเป็นอยู่ก่อนสร้าง
-
-**การสร้างแม่แบบ** - สร้างแม่แบบใหม่ด้วยคำสั่ง `dump-template`
 
 **การสืบทอดสไตล์** - ใช้สไตล์แม่แบบกับเนื้อหาที่สร้างโดยอัตโนมัติ
 
@@ -201,19 +193,11 @@ This is the first public release of md2docx, a Markdown to DOCX converter with T
 
 **Build command** - Convert markdown to DOCX with extensive options.
 
-**Validate command** - Check template validity before use.
-
-**Dump-template command** - Generate new templates with customization.
-
 **Verbose output** - Detailed logging with `-v` flag for debugging.
 
 **Output filename variables** - Use `{{currenttime}}`, `{{version}}`, etc. in output filenames.
 
 **คำสั่ง Build** - แปลง markdown เป็น DOCX พร้อมตัวเลือกมากมาย
-
-**คำสั่ง Validate** - ตรวจสอบความถูกต้องของแม่แบบก่อนใช้
-
-**คำสั่ง Dump-template** - สร้างแม่แบบใหม่พร้อมการปรับแต่ง
 
 **เอาต์พุตละเอียด** - การบันทึกรายละเอียดด้วยแฟล็ก `-v` สำหรับการดีบัก
 

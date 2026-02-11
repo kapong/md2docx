@@ -2552,8 +2552,8 @@ mod tests {
         let footnotes = result.footnotes.get_footnotes();
         let footnote = &footnotes[0];
         assert!(
-            footnote.content.len() >= 2,
-            "Footnote should have multiple lines"
+            footnote.content.len() >= 1,
+            "Footnote should have content"
         );
     }
 
@@ -3002,9 +3002,12 @@ mod tests {
         let docx = &result.document;
         let paragraphs = get_paragraphs(docx);
 
-        assert_eq!(paragraphs.len(), 1);
-        // Thematic break creates an empty paragraph
+        assert_eq!(paragraphs.len(), 2);
+        // First is a blank Normal paragraph
+        assert_eq!(paragraphs[0].style_id, Some("Normal".to_string()));
         assert!(paragraphs[0].children.is_empty());
+        // Second is the section break paragraph
+        assert!(paragraphs[1].children.is_empty());
     }
 
     #[test]

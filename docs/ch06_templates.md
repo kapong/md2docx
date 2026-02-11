@@ -32,67 +32,15 @@ Key benefits of using templates:
 
 ---
 
-## Using dump-template Command {#ch06-dump-template}
-
-### English
-
-The easiest way to create a template is using the `dump-template` command. This generates a starter template with all required styles.
-
-### ภาษาไทย
-
-วิธีที่ง่ายที่สุดในการสร้างแม่แบบคือใช้คำสั่ง `dump-template` คำสั่งนี้สร้างแม่แบบเริ่มต้นที่มีสไตล์ที่จำเป็นทั้งหมด
-
-### Basic Usage / การใช้งานพื้นฐาน
-
-```bash
-# Generate default template
-md2docx dump-template -o custom-reference.docx
-
-# Generate Thai-optimized template
-md2docx dump-template -o thai-template.docx --lang th
-
-# Generate English-optimized template
-md2docx dump-template -o english-template.docx --lang en
-
-# Generate minimal template (fewer styles)
-md2docx dump-template -o minimal.docx --minimal
-```
-
-### Command Options / ตัวเลือกคำสั่ง
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--output` | `-o` | Output filename (required) |
-| `--lang` | | Language preset (`en` or `th`) |
-| `--minimal` | | Generate minimal template |
-
-### Language Presets / ค่าที่ตั้งล่วงหน้าตามภาษา
-
-**English (`--lang en`):**
-- Default font: Calibri
-- Heading font: Calibri Light
-- Code font: Consolas
-- Base size: 11pt
-- Heading color: Blue (#2E74B5)
-
-**Thai (`--lang th`):**
-- Default font: TH Sarabun New
-- Heading font: TH Sarabun New
-- Code font: Consolas
-- Base size: 14pt (better for Thai readability)
-- Heading color: Blue (#2E74B5)
-
----
-
 ## Required Styles {#ch06-required-styles}
 
 ### English
 
-md2docx requires certain styles to be present in your template. The `dump-template` command creates all of these automatically.
+md2docx requires certain styles to be present in your template.
 
 ### ภาษาไทย
 
-md2docx ต้องการให้มีสไตล์บางอย่างในแม่แบบของคุณ คำสั่ง `dump-template` สร้างสไตล์เหล่านี้ทั้งหมดโดยอัตโนมัติ
+md2docx ต้องการให้มีสไตล์บางอย่างในแม่แบบของคุณ
 
 ### Style Reference Table / ตารางอ้างอิงสไตล์
 
@@ -235,25 +183,19 @@ dir = "./templates/my-company-template/"
 
 ### English
 
-After generating a template with `dump-template`, customize it in Microsoft Word:
+After creating a template DOCX, customize it in Microsoft Word:
 
 ### ภาษาไทย
 
-หลังจากสร้างแม่แบบด้วย `dump-template` ปรับแต่งใน Microsoft Word:
+หลังจากสร้างแม่แบบ ปรับแต่งใน Microsoft Word:
 
 ### Step-by-Step Guide / คู่มือทีละขั้นตอน
 
 #### 1. Open the Template / เปิดแม่แบบ
 
-```bash
-# Generate template first
-md2docx dump-template -o my-template.docx
+Open your template DOCX file in Word.
 
-# Then open in Word
-open my-template.docx  # macOS
-# or
-start my-template.docx  # Windows
-```
+เปิดไฟล์แม่แบบ DOCX ใน Word
 
 #### 2. Access the Styles Pane / เข้าถึงบานหน้าต่าง Styles
 
@@ -332,65 +274,6 @@ File → Save (or Ctrl+S / Cmd+S)
 
 ---
 
-## validate-template Command {#ch06-validate-template}
-
-### English
-
-Before using a template, validate it to ensure all required styles are present.
-
-### ภาษาไทย
-
-ก่อนใช้แม่แบบ ให้ตรวจสอบเพื่อให้แน่ใจว่ามีสไตล์ที่จำเป็นทั้งหมด
-
-### Usage / การใช้งาน
-
-```bash
-# Validate a template file
-md2docx validate-template my-template.docx
-
-# Validate with verbose output
-md2docx validate-template my-template.docx --verbose
-```
-
-### Output Examples / ตัวอย่างเอาต์พุต
-
-**Valid Template / แม่แบบที่ถูกต้อง:**
-
-```
-✓ Template validation passed
-
-Required styles: 8/8 present
-Recommended styles: 12/12 present
-
-Template is ready to use with md2docx.
-```
-
-**Missing Styles / ขาดสไตล์:**
-
-```
-✗ Template validation failed
-
-Missing required styles:
-  - Code
-  - CodeChar
-
-Missing recommended styles:
-  - Caption
-  - FootnoteText
-
-Run 'md2docx dump-template' to generate a complete template.
-```
-
-### Validation Levels / ระดับการตรวจสอบ
-
-| Level | Styles | Impact if Missing |
-|-------|--------|-------------------|
-| Required | Title, Heading1-3, Normal, Code, CodeChar, TOC1-3, ListParagraph | Document may not render correctly |
-| Recommended | Subtitle, Heading4, Quote, Caption, FootnoteText, Hyperlink, CodeFilename | Reduced functionality |
-| Optional | Custom styles | No impact |
-
----
-
 ## Best Practices {#ch06-best-practices}
 
 ### English
@@ -401,21 +284,11 @@ Follow these guidelines for effective template creation.
 
 ปฏิบัติตามแนวทางเหล่านี้สำหรับการสร้างแม่แบบที่มีประสิทธิภาพ
 
-### 1. Start with dump-template / เริ่มด้วย dump-template
+### 1. Use a Reference DOCX / ใช้ DOCX อ้างอิง
 
-Always generate a base template rather than creating from scratch:
+Create a template by designing styles in a DOCX file in Word, then use it as a reference:
 
-สร้างแม่แบบฐานแทนการสร้างจากศูนย์เสมอ:
-
-```bash
-# Good / ดี
-md2docx dump-template -o my-template.docx
-# Then customize in Word / จากนั้นปรับแต่งใน Word
-
-# Avoid / หลีกเลี่ง
-# Creating empty DOCX and adding styles manually
-# สร้าง DOCX ว่างและเพิ่มสไตล์ด้วยตนเอง
-```
+สร้างแม่แบบโดยออกแบบสไตล์ในไฟล์ DOCX ใน Word แล้วใช้เป็นข้อมูลอ้างอิง:
 
 ### 2. Enable Auto-Update / เปิดใช้งาน Auto-Update
 

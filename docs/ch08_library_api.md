@@ -300,62 +300,6 @@ let docx_bytes = Document::from_directory(
 std::fs::write("manual.docx", docx_bytes)?;
 ```
 
-### dump_template / สร้างแม่แบบ
-
-Generate a default template DOCX file.
-
-สร้างไฟล์แม่แบบ DOCX เริ่มต้น
-
-```rust
-use md2docx::{dump_template, Language};
-
-pub fn dump_template(lang: Language) -> Result<Vec<u8>, Error>
-```
-
-**Example / ตัวอย่าง:**
-
-```rust
-// Generate English template
-let template_bytes = dump_template(Language::English)?;
-std::fs::write("template-en.docx", template_bytes)?;
-
-// Generate Thai template
-let template_bytes = dump_template(Language::Thai)?;
-std::fs::write("template-th.docx", template_bytes)?;
-```
-
-### validate_template / ตรวจสอบแม่แบบ
-
-Validate a template file and return a detailed report.
-
-ตรวจสอบไฟล์แม่แบบและส่งคืนรายงานโดยละเอียด
-
-```rust
-use std::path::Path;
-use md2docx::{validate_template, ValidationReport};
-
-pub fn validate_template(path: &Path) -> Result<ValidationReport, Error>
-```
-
-**Example / ตัวอย่าง:**
-
-```rust
-let report = validate_template(Path::new("my-template.docx"))?;
-
-println!("Required styles: {}/{}", 
-    report.required_present(), 
-    report.required_total());
-println!("Recommended styles: {}/{}", 
-    report.recommended_present(), 
-    report.recommended_total());
-
-if !report.is_valid() {
-    for missing in report.missing_required() {
-        eprintln!("Missing required style: {}", missing);
-    }
-}
-```
-
 ---
 
 ## Builder Pattern {#ch08-builder-pattern}
@@ -655,9 +599,6 @@ let bytes = Document::builder()
 ```rust
 // Main types
 use md2docx::{Document, Config, Template};
-
-// Utility functions
-use md2docx::{dump_template, validate_template};
 
 // Enums
 use md2docx::{Language, Error};

@@ -1422,13 +1422,14 @@ fn block_to_paragraphs(
         }
 
         Block::CodeBlock {
+            lang,
             content,
             filename,
             highlight_lines,
             show_line_numbers,
-            ..
         } => code_block_to_paragraphs(
             content,
+            lang.as_deref(),
             filename.as_deref(),
             highlight_lines,
             *show_line_numbers,
@@ -1469,7 +1470,7 @@ fn block_to_paragraphs(
 
         Block::Mermaid { content, .. } => {
             // This is a fallback case if block_to_elements falls back to block_to_paragraphs
-            code_block_to_paragraphs(content, Some("mermaid"), &Vec::new(), false)
+            code_block_to_paragraphs(content, Some("mermaid"), None, &Vec::new(), false)
         }
 
         Block::Include { resolved, .. } => {
@@ -1822,41 +1823,61 @@ fn get_row_shading(
 /// Convert a code block to paragraphs (one per line)
 fn code_block_to_paragraphs(
     content: &str,
+    lang: Option<&str>,
     filename: Option<&str>,
     highlight_lines: &[u32],
     show_line_numbers: bool,
 ) -> Vec<Paragraph> {
     let mut paragraphs = Vec::new();
 
+    // Get syntax-highlighted tokens for the content
+    let highlighted = crate::docx::highlight::highlight_code(content, lang);
+
     // Add filename as a separate paragraph if present
     if let Some(fname) = filename {
         let filename_para = Paragraph::with_style("CodeFilename")
             .add_text(fname)
-            .spacing(0, 0)
+            .spacing(120, 0)
             .line_spacing(240, "auto");
         paragraphs.push(filename_para);
     }
 
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+
     // Add each line as a separate paragraph
-    // Line numbers are 1-based
-    for (i, line) in content.lines().enumerate() {
+    for (i, highlighted_line) in highlighted.iter().enumerate() {
         let line_num = (i + 1) as u32;
+
+        // First line gets spacing before, last line gets spacing after
+        let sp_before = if i == 0 && filename.is_none() { 120 } else { 0 };
+        let sp_after = if i == total_lines - 1 { 120 } else { 0 };
+
         let mut p = Paragraph::with_style("Code")
-            .spacing(0, 0)
+            .spacing(sp_before, sp_after)
             .line_spacing(240, "auto");
 
         // Handle line numbers
         if show_line_numbers {
-            // Add line number as a separate run with gray color
             let num_text = format!("{:>2}. ", line_num);
             p = p.add_run(Run::new(num_text).color("888888"));
         }
 
-        p = p.add_text(line);
+        // Add syntax-highlighted runs
+        if highlighted_line.is_empty() {
+            p = p.add_text("");
+        } else {
+            for (text, color) in highlighted_line {
+                let mut run = Run::new(text.as_str());
+                if let Some(c) = color {
+                    run = run.color(c);
+                }
+                p = p.add_run(run);
+            }
+        }
 
-        // Handle highlighting
+        // Handle line highlighting
         if highlight_lines.contains(&line_num) {
-            // Light yellow background for highlighted lines
             p = p.shading("FFFACD"); // LemonChiffon
         }
 
@@ -1868,7 +1889,7 @@ fn code_block_to_paragraphs(
         paragraphs.push(
             Paragraph::with_style("Code")
                 .add_text("")
-                .spacing(0, 0)
+                .spacing(120, 120)
                 .line_spacing(240, "auto"),
         );
     }
@@ -2851,15 +2872,12 @@ mod tests {
         // Should have 3 lines of code
         assert_eq!(paragraphs.len(), 3);
         assert_eq!(paragraphs[0].style_id, Some("Code".to_string()));
-        assert_eq!(
-            paragraphs[0].iter_runs().next().unwrap().text,
-            "fn main() {"
-        );
-        assert_eq!(
-            paragraphs[1].iter_runs().next().unwrap().text,
-            "    println!(\"Hello\");"
-        );
-        assert_eq!(paragraphs[2].iter_runs().next().unwrap().text, "}");
+        let line1: String = paragraphs[0].iter_runs().map(|r| r.text.as_str()).collect();
+        assert_eq!(line1, "fn main() {");
+        let line2: String = paragraphs[1].iter_runs().map(|r| r.text.as_str()).collect();
+        assert_eq!(line2, "    println!(\"Hello\");");
+        let line3: String = paragraphs[2].iter_runs().map(|r| r.text.as_str()).collect();
+        assert_eq!(line3, "}");
     }
 
     #[test]
@@ -3284,10 +3302,8 @@ End of document.
         let paragraphs = get_paragraphs(docx);
 
         // Check that indentation is preserved
-        assert_eq!(
-            paragraphs[1].iter_runs().next().unwrap().text,
-            "    println!(\"Hello\");"
-        );
+        let line2: String = paragraphs[1].iter_runs().map(|r| r.text.as_str()).collect();
+        assert_eq!(line2, "    println!(\"Hello\");");
     }
 
     #[test]
@@ -3445,10 +3461,8 @@ End of document.
         assert_eq!(paragraphs[0].style_id, Some("CodeFilename".to_string()));
         assert_eq!(paragraphs[0].iter_runs().next().unwrap().text, "main.rs");
         assert_eq!(paragraphs[1].style_id, Some("Code".to_string()));
-        assert_eq!(
-            paragraphs[1].iter_runs().next().unwrap().text,
-            "fn main() {}"
-        );
+        let code_text: String = paragraphs[1].iter_runs().map(|r| r.text.as_str()).collect();
+        assert_eq!(code_text, "fn main() {}");
     }
 
     #[test]

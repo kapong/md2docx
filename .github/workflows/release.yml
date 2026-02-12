@@ -93,7 +93,7 @@ jobs:
         run: cargo build --release --bin md2docx
       
       - name: Rename binary
-        run: mv target/release/md2docx.exe md2docx-windows-x86_64.exe
+        run: Move-Item target/release/md2docx.exe md2docx-windows-x86_64.exe
       
       - uses: actions/upload-artifact@v4
         with:

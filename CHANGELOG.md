@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-02-12
+
+### Added
+- Windows x86_64 binary build support
+- PowerShell installer script (install.ps1) for Windows users
+- Scoop package manager manifest (bucket/md2docx.json)
+- Windows installation documentation in README
+
+### Changed
+- Updated install.sh to detect Windows environments and redirect to PowerShell installer
+- Release workflow now includes Windows build and Scoop manifest auto-update
+
 ## [0.1.7] - 2026-02-11
 
 ### Fixed

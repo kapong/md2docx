@@ -4,6 +4,15 @@ set -e
 REPO="kapong/md2docx"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
+# Check for Windows environments and redirect to PowerShell installer
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        echo "Windows detected. Please use the PowerShell installer instead:"
+        echo "  irm https://raw.githubusercontent.com/kapong/md2docx/main/install.ps1 | iex"
+        exit 1
+        ;;
+esac
+
 # Detect OS and architecture
 detect_platform() {
     local os arch

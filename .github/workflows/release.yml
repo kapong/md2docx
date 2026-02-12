@@ -78,9 +78,31 @@ jobs:
           name: md2docx-linux-x86_64
           path: md2docx-linux-x86_64
 
+  build-windows-x86_64:
+    name: Build Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      
+      - name: Build
+        run: cargo build --release --bin md2docx
+      
+      - name: Rename binary
+        run: Move-Item target/release/md2docx.exe md2docx-windows-x86_64.exe
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: md2docx-windows-x86_64
+          path: md2docx-windows-x86_64.exe
+
   release:
     name: Create Release
-    needs: [build-macos-arm64, build-macos-x86_64, build-linux-x86_64]
+    needs: [build-macos-arm64, build-macos-x86_64, build-linux-x86_64, build-windows-x86_64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +117,8 @@ jobs:
           mv artifacts/md2docx-darwin-arm64/md2docx-darwin-arm64 release/
           mv artifacts/md2docx-darwin-x86_64/md2docx-darwin-x86_64 release/
           mv artifacts/md2docx-linux-x86_64/md2docx-linux-x86_64 release/
-          chmod +x release/*
+          mv artifacts/md2docx-windows-x86_64/md2docx-windows-x86_64.exe release/
+          chmod +x release/md2docx-darwin-arm64 release/md2docx-darwin-x86_64 release/md2docx-linux-x86_64
           cd release && sha256sum * > checksums.txt
       
       - name: Update Homebrew Formula
@@ -155,6 +178,53 @@ jobs:
           git commit -m "chore: update Homebrew formula to v$VERSION" || echo "No changes to commit"
           git push origin main
 
+      - name: Update Scoop Manifest
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          WIN_SHA=$(sha256sum release/md2docx-windows-x86_64.exe | cut -d' ' -f1)
+          
+          # Prepare git for committing
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Fetch and checkout main branch
+          git fetch origin main:main
+          git checkout main
+          
+          # Create bucket directory if it doesn't exist
+          mkdir -p bucket
+          
+          # Generate Scoop manifest
+          cat <<EOF > bucket/md2docx.json
+          {
+              "version": "$VERSION",
+              "description": "Markdown to professional DOCX converter with native Thai support",
+              "homepage": "https://github.com/kapong/md2docx",
+              "license": "MIT",
+              "architecture": {
+                  "64bit": {
+                      "url": "https://github.com/kapong/md2docx/releases/download/v$VERSION/md2docx-windows-x86_64.exe",
+                      "hash": "$WIN_SHA",
+                      "bin": [["md2docx-windows-x86_64.exe", "md2docx"]]
+                  }
+              },
+              "checkver": {
+                  "github": "https://github.com/kapong/md2docx"
+              },
+              "autoupdate": {
+                  "architecture": {
+                      "64bit": {
+                          "url": "https://github.com/kapong/md2docx/releases/download/v\$version/md2docx-windows-x86_64.exe"
+                      }
+                  }
+              }
+          }
+          EOF
+          
+          git add bucket/md2docx.json
+          git commit -m "chore: update Scoop manifest to v$VERSION" || echo "No changes to commit"
+          git push origin main
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -162,7 +232,9 @@ jobs:
             release/md2docx-darwin-arm64
             release/md2docx-darwin-x86_64
             release/md2docx-linux-x86_64
+            release/md2docx-windows-x86_64.exe
             release/checksums.txt
             install.sh
+            install.ps1
           generate_release_notes: true
 

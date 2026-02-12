@@ -31,7 +31,20 @@ brew tap kapong/md2docx https://github.com/kapong/md2docx
 brew install md2docx
 ```
 
-### Option 3: Docker (Recommended)
+### Option 3: PowerShell (Windows)
+Install the latest version with a single command:
+```powershell
+irm https://raw.githubusercontent.com/kapong/md2docx/main/install.ps1 | iex
+```
+
+### Option 4: Scoop (Windows)
+Install via Scoop package manager:
+```powershell
+scoop bucket add md2docx https://github.com/kapong/md2docx
+scoop install md2docx
+```
+
+### Option 5: Docker
 Our Docker image is multi-platform (`amd64` and `arm64`), supporting both Intel and Apple Silicon Macs.
 
 **Pull the image:**

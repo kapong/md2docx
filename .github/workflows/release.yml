@@ -121,12 +121,13 @@ jobs:
           chmod +x release/md2docx-darwin-arm64 release/md2docx-darwin-x86_64 release/md2docx-linux-x86_64
           cd release && sha256sum * > checksums.txt
       
-      - name: Update Homebrew Formula
+      - name: Update Package Manifests
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           ARM64_SHA=$(sha256sum release/md2docx-darwin-arm64 | cut -d' ' -f1)
           X64_SHA=$(sha256sum release/md2docx-darwin-x86_64 | cut -d' ' -f1)
           LINUX_SHA=$(sha256sum release/md2docx-linux-x86_64 | cut -d' ' -f1)
+          WIN_SHA=$(sha256sum release/md2docx-windows-x86_64.exe | cut -d' ' -f1)
           
           # Prepare git for committing
           git config --local user.email "action@github.com"
@@ -136,11 +137,14 @@ jobs:
           git fetch origin main:main
           git checkout main
           
-          # Overwrite Formula/md2docx.rb with clean template
-          cat <<EOF > Formula/md2docx.rb
+          # Update Homebrew Formula
+          cat <<'RUBY_EOF' > Formula/md2docx.rb
           class Md2docx < Formula
             desc "Markdown to professional DOCX converter with native Thai support"
             homepage "https://github.com/kapong/md2docx"
+          RUBY_EOF
+          
+          cat <<EOF >> Formula/md2docx.rb
             version "$VERSION"
 
             if OS.mac?
@@ -171,31 +175,9 @@ jobs:
           end
           EOF
           
-          # Remove leading tabs/spaces from heredoc if needed, but here we'll just commit it as is
-          # (Homebrew is fine with indentation)
-          
-          git add Formula/md2docx.rb
-          git commit -m "chore: update Homebrew formula to v$VERSION" || echo "No changes to commit"
-          git push origin main
-
-      - name: Update Scoop Manifest
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          WIN_SHA=$(sha256sum release/md2docx-windows-x86_64.exe | cut -d' ' -f1)
-          
-          # Prepare git for committing
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Fetch and checkout main branch
-          git fetch origin main:main
-          git checkout main
-          
-          # Create bucket directory if it doesn't exist
+          # Update Scoop Manifest
           mkdir -p bucket
-          
-          # Generate Scoop manifest
-          cat <<EOF > bucket/md2docx.json
+          cat > bucket/md2docx.json <<EOF
           {
               "version": "$VERSION",
               "description": "Markdown to professional DOCX converter with native Thai support",
@@ -221,8 +203,8 @@ jobs:
           }
           EOF
           
-          git add bucket/md2docx.json
-          git commit -m "chore: update Scoop manifest to v$VERSION" || echo "No changes to commit"
+          git add Formula/md2docx.rb bucket/md2docx.json
+          git commit -m "chore: update package manifests to v$VERSION" || echo "No changes to commit"
           git push origin main
 
       - name: Create GitHub Release

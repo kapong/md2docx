@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.9] - 2026-02-13
 
 ### Fixed
+
 - Code block content no longer modified by image path resolution
 - Image width examples now reference existing files
 - Table cell text alignment applied correctly via paragraph properties
@@ -22,18 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.8] - 2026-02-12
 
 ### Added
+
 - Windows x86_64 binary build support
 - PowerShell installer script (install.ps1) for Windows users
 - Scoop package manager manifest (bucket/md2docx.json)
 - Windows installation documentation in README
 
 ### Changed
+
 - Updated install.sh to detect Windows environments and redirect to PowerShell installer
 - Release workflow now includes Windows build and Scoop manifest auto-update
 
 ## [0.1.7] - 2026-02-11
 
 ### Fixed
+
 - Footnote references now display as superscript in body text
 - Footnote content at page bottom now shows footnote numbers
 - Footnote content uses FootnoteText style without indentation
@@ -44,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added blank Normal paragraph before section breaks for cleaner chapter endings
 
 ### Added
+
 - Thai text samples chapter (ch09) in documentation
 
 ## [0.1.0] - 2025-01-30

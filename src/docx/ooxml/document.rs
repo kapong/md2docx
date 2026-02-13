@@ -1316,6 +1316,7 @@ impl TableCellElement {
     }
 
     /// Set cell alignment
+    #[allow(dead_code)]
     pub fn alignment(mut self, align: &str) -> Self {
         self.alignment = Some(align.to_string());
         self

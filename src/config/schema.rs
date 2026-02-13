@@ -677,7 +677,7 @@ title = "Missing closing bracket"
     #[test]
     #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
     fn test_resolve_filename_with_document_vars() {
-        use super::{DocumentSection, ProjectConfig};
+        use super::ProjectConfig;
 
         let mut project_config = ProjectConfig::default();
         project_config.document.title = "My Document".to_string();

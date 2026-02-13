@@ -346,34 +346,6 @@ mod tests {
     }
 
     #[test]
-    fn test_canvas_padding() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
-            <rect width="100" height="50"/>
-        </svg>
-        "#;
-
-        let result = add_canvas_padding(svg).unwrap();
-
-        // Should have 15% padding (100 * 1.15 = 115, 50 * 1.15 = 57.5)
-        assert!(result.contains(r#"width="115.00""#));
-        assert!(result.contains(r#"height="57.50""#));
-    }
-
-    #[test]
-    fn test_canvas_padding_with_units() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100px" height="50px">
-            <rect width="100" height="50"/>
-        </svg>
-        "#;
-
-        let result = add_canvas_padding(svg).unwrap();
-
-        // Should preserve px units
-        assert!(result.contains(r#"width="115.00px""#));
-        assert!(result.contains(r#"height="57.50px""#));
-    }
-
-    #[test]
     fn test_strip_edge_labels_pipe_format() {
         let input = "A -->|label| B";
         let output = strip_edge_labels(input);

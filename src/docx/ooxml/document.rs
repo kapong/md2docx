@@ -872,7 +872,9 @@ impl Paragraph {
                 writer.write_event(Event::Empty(cols))?;
 
                 // Title page (different first page)
-                if let Some(refs) = header_footer_refs {
+                // Use refs_to_use (same source as header/footer references above)
+                // to ensure titlePg is consistent with the actual refs written
+                if let Some(refs) = refs_to_use {
                     if refs.different_first_page {
                         writer.write_event(Event::Empty(BytesStart::new("w:titlePg")))?;
                     }

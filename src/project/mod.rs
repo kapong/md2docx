@@ -48,13 +48,31 @@ impl ProjectBuilder {
     pub fn from_directory(dir: impl AsRef<Path>) -> Result<Self> {
         let base_dir = dir.as_ref().to_path_buf();
 
-        // Load config from md2docx.toml if it exists
-        let config_path = base_dir.join("md2docx.toml");
-        let config = if config_path.exists() {
-            ProjectConfig::from_file(&config_path)?
+        // Load config with layered approach:
+        // 1. First peek at root md2docx.toml to find template.dir
+        // 2. Load template/md2docx.toml as base defaults
+        // 3. Merge root md2docx.toml as overrides on top
+        let root_config_path = base_dir.join("md2docx.toml");
+
+        // Peek at root config to find template dir
+        let template_dir_hint = if root_config_path.exists() {
+            ProjectConfig::from_file(&root_config_path)
+                .ok()
+                .and_then(|c| c.template.dir.clone())
         } else {
-            ProjectConfig::default()
+            None
         };
+
+        // Resolve template config path
+        let template_config_path = template_dir_hint.as_ref().map(|td| {
+            base_dir.join(td).join("md2docx.toml")
+        });
+
+        // Load layered config: template defaults + root overrides
+        let config = ProjectConfig::from_files_layered(
+            template_config_path.as_deref(),
+            if root_config_path.exists() { Some(&root_config_path) } else { None },
+        )?;
 
         // Discover project files
         let project = DiscoveredProject::discover_with_config(&base_dir, &config)?;
@@ -358,7 +376,7 @@ impl ProjectBuilder {
             };
 
             if font_dir.exists() {
-                // Collect font names to embed: the default font and code font
+                // Collect font names to embed: only fonts actually used (default + code)
                 let mut font_names: Vec<&str> = Vec::new();
                 if !self.config.fonts.default.is_empty() {
                     font_names.push(&self.config.fonts.default);
@@ -367,17 +385,12 @@ impl ProjectBuilder {
                     font_names.push(&self.config.fonts.code);
                 }
 
-                // If no specific fonts named, embed all fonts found in the directory
+                // Only embed fonts that are explicitly configured as used
                 if font_names.is_empty() {
-                    match crate::docx::font_embed::scan_font_dir(&font_dir) {
-                        Ok(families) => {
-                            let all_names: Vec<String> = families.keys().cloned().collect();
-                            let name_refs: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
-                            crate::docx::font_embed::prepare_embedded_fonts(&font_dir, &name_refs)
-                                .unwrap_or_default()
-                        }
-                        Err(_) => Vec::new(),
-                    }
+                    eprintln!(
+                        "Warning: Font embedding enabled but no fonts configured (fonts.default / fonts.code). Skipping embed."
+                    );
+                    Vec::new()
                 } else {
                     crate::docx::font_embed::prepare_embedded_fonts(&font_dir, &font_names)
                         .unwrap_or_default()

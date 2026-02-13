@@ -318,6 +318,10 @@ pub(crate) struct StylesDocument {
     margin_left: Option<u32>,
     /// Right margin in twips
     margin_right: Option<u32>,
+    /// Tab stops from header-footer.docx template's Header style (overrides computed)
+    header_template_tabs: Option<Vec<(u32, String)>>,
+    /// Tab stops from header-footer.docx template's Footer style (overrides computed)
+    footer_template_tabs: Option<Vec<(u32, String)>>,
 }
 
 impl StylesDocument {
@@ -329,6 +333,8 @@ impl StylesDocument {
             page_width: None,
             margin_left: None,
             margin_right: None,
+            header_template_tabs: None,
+            footer_template_tabs: None,
         };
         doc.add_default_styles();
         doc
@@ -349,9 +355,29 @@ impl StylesDocument {
             page_width,
             margin_left,
             margin_right,
+            header_template_tabs: None,
+            footer_template_tabs: None,
         };
         doc.add_default_styles();
         doc
+    }
+
+    /// Set the tab stops from a header-footer.docx template's styles.
+    /// When set, these override the computed tab positions for Header/Footer styles.
+    pub fn set_template_tabs(
+        &mut self,
+        header_tabs: Vec<(u32, String)>,
+        footer_tabs: Vec<(u32, String)>,
+    ) {
+        if !header_tabs.is_empty() {
+            self.header_template_tabs = Some(header_tabs);
+        }
+        if !footer_tabs.is_empty() {
+            self.footer_template_tabs = Some(footer_tabs);
+        }
+        // Rebuild styles with new tabs
+        self.styles.clear();
+        self.add_default_styles();
     }
 
     /// Compute the text area width in twips (page_width - left_margin - right_margin)
@@ -772,49 +798,56 @@ impl StylesDocument {
         );
 
         // Header style (for header paragraphs)
-        // Tab positions computed from page dimensions (center and right-aligned)
+        // Use template tabs if available, otherwise compute from page dimensions
         let text_width = self.text_area_width();
-        let center_tab = text_width / 2;
-        let right_tab = text_width;
-        self.add_style(
-            Style::new("Header", "header", StyleType::Paragraph)
-                .ui_priority(99)
-                .based_on("Normal")
-                .font(&ascii_font, &ascii_font, &cs_font)
-                .size(normal_size)
-                .size_cs(normal_size_cs)
-                .add_tab(TabStop {
-                    position: center_tab,
-                    alignment: "center".to_string(),
-                    leader: None,
-                })
-                .add_tab(TabStop {
-                    position: right_tab,
-                    alignment: "right".to_string(),
-                    leader: None,
-                }),
-        );
+        let header_tabs: Vec<TabStop> = if let Some(ref tmpl_tabs) = self.header_template_tabs {
+            tmpl_tabs.iter().map(|(pos, align)| TabStop {
+                position: *pos,
+                alignment: align.clone(),
+                leader: None,
+            }).collect()
+        } else {
+            vec![
+                TabStop { position: text_width / 2, alignment: "center".to_string(), leader: None },
+                TabStop { position: text_width, alignment: "right".to_string(), leader: None },
+            ]
+        };
+
+        let mut header_style = Style::new("Header", "header", StyleType::Paragraph)
+            .ui_priority(99)
+            .based_on("Normal")
+            .font(&ascii_font, &ascii_font, &cs_font)
+            .size(normal_size)
+            .size_cs(normal_size_cs);
+        for tab in header_tabs {
+            header_style = header_style.add_tab(tab);
+        }
+        self.add_style(header_style);
 
         // Footer style (for footer paragraphs)
-        // Same tab positions as Header
-        self.add_style(
-            Style::new("Footer", "footer", StyleType::Paragraph)
-                .ui_priority(99)
-                .based_on("Normal")
-                .font(&ascii_font, &ascii_font, &cs_font)
-                .size(normal_size)
-                .size_cs(normal_size_cs)
-                .add_tab(TabStop {
-                    position: center_tab,
-                    alignment: "center".to_string(),
-                    leader: None,
-                })
-                .add_tab(TabStop {
-                    position: right_tab,
-                    alignment: "right".to_string(),
-                    leader: None,
-                }),
-        );
+        let footer_tabs: Vec<TabStop> = if let Some(ref tmpl_tabs) = self.footer_template_tabs {
+            tmpl_tabs.iter().map(|(pos, align)| TabStop {
+                position: *pos,
+                alignment: align.clone(),
+                leader: None,
+            }).collect()
+        } else {
+            vec![
+                TabStop { position: text_width / 2, alignment: "center".to_string(), leader: None },
+                TabStop { position: text_width, alignment: "right".to_string(), leader: None },
+            ]
+        };
+
+        let mut footer_style = Style::new("Footer", "footer", StyleType::Paragraph)
+            .ui_priority(99)
+            .based_on("Normal")
+            .font(&ascii_font, &ascii_font, &cs_font)
+            .size(normal_size)
+            .size_cs(normal_size_cs);
+        for tab in footer_tabs {
+            footer_style = footer_style.add_tab(tab);
+        }
+        self.add_style(footer_style);
 
         // CodeFilename style (filename above code blocks)
         let code_filename_size = if normal_size > 4 { normal_size - 4 } else { 18 };

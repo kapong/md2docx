@@ -371,22 +371,49 @@ pub fn markdown_to_docx_with_templates(
             }
 
             if has_cover {
-                // Find the section break after cover (should be at index 1)
-                if build_result.document.elements.len() > 1 {
-                    if let crate::docx::ooxml::DocElement::Paragraph(p) =
-                        &mut build_result.document.elements[1]
-                    {
-                        if p.is_section_break() {
-                            // Change section break to page break to keep TOC in same section as cover
-                            **p = crate::docx::ooxml::Paragraph::new().page_break();
-                        }
-                    }
-                }
+                // Keep the cover section break at index [1] intact.
+                // It defines the cover section's properties (headers/footers from cover.docx
+                // or suppressed). Do NOT convert it to a page break.
+                //
+                // Document structure after this:
+                //   [0]: Cover raw XML           (Section 1: cover)
+                //   [1]: Cover section break     (defines Section 1 props)
+                //   [2..n]: TOC elements          (Section 2: TOC)
+                //   [n+1]: TOC section break     (defines Section 2 props, suppressed h/f)
+                //   [n+2..]: Content              (Section 3: content, governed by final sectPr)
 
-                // Insert TOC elements after the page break
+                // Insert TOC elements after the cover section break
+                let toc_count = toc_elements.len();
                 for (i, elem) in toc_elements.into_iter().enumerate() {
                     build_result.document.elements.insert(2 + i, elem);
                 }
+
+                // Add a section break after TOC to separate it from content.
+                // TOC section should have suppressed headers/footers.
+                let mut toc_section_break = crate::docx::ooxml::Paragraph::new()
+                    .section_break("nextPage")
+                    .suppress_header_footer();
+
+                // Apply same page layout as the rest of the document
+                if let Some(ref page_config) = doc_config.page {
+                    let layout = crate::docx::ooxml::PageLayout {
+                        width: page_config.width,
+                        height: page_config.height,
+                        margin_top: page_config.margin_top,
+                        margin_right: page_config.margin_right,
+                        margin_bottom: page_config.margin_bottom,
+                        margin_left: page_config.margin_left,
+                        margin_header: page_config.margin_header,
+                        margin_footer: page_config.margin_footer,
+                        margin_gutter: page_config.margin_gutter,
+                    };
+                    toc_section_break = toc_section_break.with_page_layout(layout);
+                }
+
+                build_result.document.elements.insert(
+                    2 + toc_count,
+                    crate::docx::ooxml::DocElement::Paragraph(Box::new(toc_section_break)),
+                );
             } else {
                 // No cover, insert at the beginning
                 for (i, elem) in toc_elements.into_iter().enumerate() {
@@ -452,13 +479,26 @@ pub fn markdown_to_docx_with_templates(
     let mut content_types = ContentTypes::new();
     let rels = Relationships::root_rels();
     let mut doc_rels = Relationships::document_rels();
-    let styles = StylesDocument::with_page_layout(
+    let mut styles = StylesDocument::with_page_layout(
         lang,
         doc_config.fonts.clone(),
         doc_config.page.as_ref().and_then(|p| p.width),
         doc_config.page.as_ref().and_then(|p| p.margin_left),
         doc_config.page.as_ref().and_then(|p| p.margin_right),
     );
+
+    // If header-footer.docx template has style tab stops, use those
+    // instead of computing from page dimensions
+    if let Some(t) = templates {
+        if let Some(ref hf) = t.header_footer {
+            if !hf.header_style_tabs.is_empty() || !hf.footer_style_tabs.is_empty() {
+                styles.set_template_tabs(
+                    hf.header_style_tabs.clone(),
+                    hf.footer_style_tabs.clone(),
+                );
+            }
+        }
+    }
 
     // Process images from build_result (includes cover template images and markdown images)
     // Header/footer images are handled separately with header_ prefix
@@ -537,6 +577,9 @@ pub fn markdown_to_docx_with_templates(
     }
 
     // Update header/footer refs
+    let mut cover_header_id: Option<String> = None;
+    let mut cover_footer_id: Option<String> = None;
+
     for (num, rel_id) in &header_rel_ids {
         if *num == 1 {
             build_result.document.header_footer_refs.default_header_id = Some(rel_id.clone());
@@ -545,6 +588,9 @@ pub fn markdown_to_docx_with_templates(
         } else if *num == 3 {
             // Header 3 is the truly empty header for cover/TOC suppression
             build_result.document.empty_header_id = Some(rel_id.clone());
+        } else if *num == 4 {
+            // Header 4 is from cover.docx
+            cover_header_id = Some(rel_id.clone());
         }
     }
 
@@ -556,6 +602,32 @@ pub fn markdown_to_docx_with_templates(
         } else if *num == 3 {
             // Footer 3 is the truly empty footer for cover/TOC suppression
             build_result.document.empty_footer_id = Some(rel_id.clone());
+        } else if *num == 4 {
+            // Footer 4 is from cover.docx
+            cover_footer_id = Some(rel_id.clone());
+        }
+    }
+
+    // Apply cover header/footer refs to cover section break if cover.docx had them
+    if cover_header_id.is_some() || cover_footer_id.is_some() {
+        // Find the cover section break paragraph (inserted by apply_cover_template)
+        // It's the first section break in the document (right after the cover raw XML)
+        for elem in build_result.document.elements.iter_mut() {
+            if let crate::docx::ooxml::DocElement::Paragraph(p) = elem {
+                if p.is_section_break() && !p.suppress_header_footer {
+                    // This is the cover section break that was NOT suppressed
+                    // (meaning cover has its own headers/footers)
+                    let cover_refs = crate::docx::ooxml::HeaderFooterRefs {
+                        default_header_id: cover_header_id.clone(),
+                        default_footer_id: cover_footer_id.clone(),
+                        first_header_id: None,
+                        first_footer_id: None,
+                        different_first_page: false,
+                    };
+                    p.empty_header_footer_refs = Some(cover_refs);
+                    break;
+                }
+            }
         }
     }
 
@@ -581,22 +653,12 @@ pub fn markdown_to_docx_with_templates(
                 }
             }
 
-            // If no specific fonts configured, embed all found in directory
+            // If no specific fonts configured, skip — only embed used fonts
             if font_names.is_empty() {
-                match crate::docx::font_embed::scan_font_dir(embed_dir) {
-                    Ok(families) => {
-                        let all_names: Vec<String> = families.keys().cloned().collect();
-                        let name_refs: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
-                        auto_embedded_fonts = crate::docx::font_embed::prepare_embedded_fonts(
-                            embed_dir, &name_refs,
-                        )
-                        .unwrap_or_default();
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: Could not scan font directory {}: {}", embed_dir.display(), e);
-                        auto_embedded_fonts = Vec::new();
-                    }
-                }
+                eprintln!(
+                    "Warning: Font embedding enabled but no fonts configured (fonts.default / fonts.code). Skipping embed."
+                );
+                auto_embedded_fonts = Vec::new();
             } else {
                 let name_refs: Vec<&str> = font_names.iter().map(|s| s.as_str()).collect();
                 auto_embedded_fonts = crate::docx::font_embed::prepare_embedded_fonts(
@@ -958,11 +1020,89 @@ fn apply_cover_template(ctx: CoverTemplateContext<'_>) -> Result<()> {
             .elements
             .insert(0, crate::docx::ooxml::DocElement::RawXml(processed_xml));
 
+        // Render cover headers/footers if cover.docx has them
+        let cover_has_hf = ctx.cover.header_footer.as_ref().map_or(false, |hf| !hf.is_empty());
+
+        if cover_has_hf {
+            let cover_hf = ctx.cover.header_footer.as_ref().unwrap();
+            let hf_ctx = crate::template::render::header_footer::HeaderFooterContext {
+                title: ctx.doc_config
+                    .document_meta
+                    .as_ref()
+                    .map(|m| m.title.clone())
+                    .unwrap_or_else(|| ctx.doc_config.title.clone()),
+                subtitle: ctx.doc_config
+                    .document_meta
+                    .as_ref()
+                    .map(|m| m.subtitle.clone())
+                    .unwrap_or_default(),
+                author: ctx.doc_config
+                    .document_meta
+                    .as_ref()
+                    .map(|m| m.author.clone())
+                    .unwrap_or_default(),
+                date: ctx.doc_config
+                    .document_meta
+                    .as_ref()
+                    .map(|m| m.date.clone())
+                    .unwrap_or_default(),
+            };
+
+            // Use high offset to avoid collision with main header/footer rIds
+            let cover_hf_offset = 500u32;
+
+            // Render cover default header
+            if let Ok(Some(rendered)) =
+                crate::template::render::header_footer::render_default_header(cover_hf, &hf_ctx, cover_hf_offset)
+            {
+                let media_mappings = rendered
+                    .media
+                    .into_iter()
+                    .map(|(rel_id, media_file)| crate::docx::builder::MediaFileMapping {
+                        original_rel_id: rel_id,
+                        media_file,
+                    })
+                    .collect();
+                // Use number 4 for cover-specific headers/footers to avoid collision
+                ctx.build_result.headers.push(crate::docx::builder::HeaderFooterEntry {
+                    number: 4,
+                    xml_bytes: rendered.xml,
+                    media_files: media_mappings,
+                });
+            }
+
+            // Render cover default footer
+            if let Ok(Some(rendered)) =
+                crate::template::render::header_footer::render_default_footer(cover_hf, &hf_ctx, cover_hf_offset + 100)
+            {
+                let media_mappings = rendered
+                    .media
+                    .into_iter()
+                    .map(|(rel_id, media_file)| crate::docx::builder::MediaFileMapping {
+                        original_rel_id: rel_id,
+                        media_file,
+                    })
+                    .collect();
+                ctx.build_result.footers.push(crate::docx::builder::HeaderFooterEntry {
+                    number: 4,
+                    xml_bytes: rendered.xml,
+                    media_files: media_mappings,
+                });
+            }
+        }
+
         // Add a section break after the cover to separate it from TOC/content
         // Apply page config if available
-        let mut cover_section_break = crate::docx::ooxml::Paragraph::new()
-            .section_break("nextPage")
-            .suppress_header_footer();
+        let mut cover_section_break = if cover_has_hf {
+            // Cover has its own headers/footers — don't suppress, use cover refs
+            crate::docx::ooxml::Paragraph::new()
+                .section_break("nextPage")
+        } else {
+            // Cover has no headers/footers — suppress them
+            crate::docx::ooxml::Paragraph::new()
+                .section_break("nextPage")
+                .suppress_header_footer()
+        };
 
         // Apply page layout from config
         if let Some(ref page_config) = ctx.doc_config.page {

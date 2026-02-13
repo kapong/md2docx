@@ -1,6 +1,6 @@
 [package]
 name = "md2docx"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 description = "Markdown to DOCX converter with Thai/English support"
 license = "MIT"

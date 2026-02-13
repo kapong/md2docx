@@ -2,7 +2,6 @@
 
 #[cfg(feature = "cli")]
 use clap::{Parser, Subcommand};
-use regex::Regex;
 use std::path::PathBuf;
 
 #[cfg(feature = "cli")]
@@ -116,45 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Rewrite image paths in markdown content to be relative to the markdown file's directory.
 fn resolve_image_paths(content: &str, file_path: &std::path::Path) -> String {
-    if let Some(parent) = file_path.parent() {
-        // Regex for rewriting image paths: ![alt](url "title") - handling optional whitespace
-        let image_regex = Regex::new(r"!\[(.*?)\]\s*\((.*?)\)").expect("Invalid regex");
-
-        image_regex
-            .replace_all(content, |caps: &regex::Captures| {
-                let alt = &caps[1];
-                let raw_link = &caps[2];
-
-                // Trim leading/trailing whitespace from the link content
-                let link_content = raw_link.trim();
-
-                // Split url and optional title
-                let (url, title_suffix) = match link_content.find(char::is_whitespace) {
-                    Some(idx) => (&link_content[..idx], &link_content[idx..]),
-                    None => (link_content, ""),
-                };
-
-                // Skip absolute URLs, absolute paths, or data URIs
-                if url.starts_with("http://")
-                    || url.starts_with("https://")
-                    || url.starts_with("/")
-                    || url.starts_with("data:")
-                    || std::path::Path::new(url).is_absolute()
-                {
-                    return caps[0].to_string();
-                }
-
-                // Resolve relative to file parent
-                let new_path = parent.join(url);
-                // Normalize to forward slashes for consistency
-                let new_path_str = new_path.to_string_lossy().replace('\\', "/");
-
-                format!("![{}]({}{})", alt, new_path_str, title_suffix)
-            })
-            .to_string()
-    } else {
-        content.to_string()
-    }
+    md2docx::project::resolve_image_paths(content, file_path)
 }
 
 #[cfg(test)]
@@ -192,6 +153,18 @@ mod tests {
         let file_path = Path::new("docs/ch1.md");
         let result = resolve_image_paths(content, file_path);
         assert_eq!(result, "![Image](docs/img.png)");
+    }
+
+    #[test]
+    fn test_resolve_image_paths_skip_code_blocks() {
+        let content = "![Outside](img.png)\n\n```markdown\n![Inside](assets/logo.png)\n```\n\n![After](other.png)";
+        let file_path = Path::new("docs/chapter1.md");
+        let result = resolve_image_paths(content, file_path);
+        // Images outside code blocks should be resolved
+        assert!(result.contains("![Outside](docs/img.png)"));
+        assert!(result.contains("![After](docs/other.png)"));
+        // Image inside code block should be preserved verbatim
+        assert!(result.contains("![Inside](assets/logo.png)"));
     }
 }
 

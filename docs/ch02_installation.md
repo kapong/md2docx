@@ -56,7 +56,7 @@ Clone repository และ build:
 
 ```bash
 # Clone the repository / Clone repository
-git clone https://github.com/pong/md2docx.git
+git clone https://github.com/kapong/md2docx.git
 cd md2docx
 
 # Build in release mode / Build ในโหมด release

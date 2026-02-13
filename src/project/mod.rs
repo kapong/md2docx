@@ -346,6 +346,53 @@ impl ProjectBuilder {
             }
         };
 
+        // Prepare embedded fonts if enabled
+        let embedded_fonts = if self.config.fonts.embed {
+            let font_dir = if let Some(ref embed_dir) = self.config.fonts.embed_dir {
+                self.base_dir.join(embed_dir)
+            } else if let Some(ref template_dir) = self.config.template.dir {
+                // Default: look for fonts in template/fonts/
+                self.base_dir.join(template_dir).join("fonts")
+            } else {
+                self.base_dir.join("fonts")
+            };
+
+            if font_dir.exists() {
+                // Collect font names to embed: the default font and code font
+                let mut font_names: Vec<&str> = Vec::new();
+                if !self.config.fonts.default.is_empty() {
+                    font_names.push(&self.config.fonts.default);
+                }
+                if !self.config.fonts.code.is_empty() {
+                    font_names.push(&self.config.fonts.code);
+                }
+
+                // If no specific fonts named, embed all fonts found in the directory
+                if font_names.is_empty() {
+                    match crate::docx::font_embed::scan_font_dir(&font_dir) {
+                        Ok(families) => {
+                            let all_names: Vec<String> = families.keys().cloned().collect();
+                            let name_refs: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
+                            crate::docx::font_embed::prepare_embedded_fonts(&font_dir, &name_refs)
+                                .unwrap_or_default()
+                        }
+                        Err(_) => Vec::new(),
+                    }
+                } else {
+                    crate::docx::font_embed::prepare_embedded_fonts(&font_dir, &font_names)
+                        .unwrap_or_default()
+                }
+            } else {
+                eprintln!(
+                    "Warning: Font embed directory not found: {}",
+                    font_dir.display()
+                );
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
         DocumentConfig {
             title: self.config.document.title.clone(),
             toc: crate::docx::toc::TocConfig {
@@ -374,6 +421,7 @@ impl ProjectBuilder {
             process_all_headings: template_loaded,
             base_path: first_content_dir,
             page: page_config,
+            embedded_fonts,
             ..DocumentConfig::default()
         }
     }

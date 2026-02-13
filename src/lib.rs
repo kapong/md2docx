@@ -559,13 +559,99 @@ pub fn markdown_to_docx_with_templates(
         }
     }
 
-    packager.package(
+    // Handle embedded fonts
+    // If embed_dir is set but no pre-loaded fonts, auto-load from the directory
+    let auto_embedded_fonts;
+    let effective_embedded = if !doc_config.embedded_fonts.is_empty() {
+        &doc_config.embedded_fonts
+    } else if let Some(ref embed_dir) = doc_config.embed_dir {
+        if embed_dir.exists() {
+            // Collect font names to embed: configured default + code fonts
+            let mut font_names: Vec<String> = Vec::new();
+            if let Some(ref fc) = doc_config.fonts {
+                if let Some(ref default) = fc.default {
+                    if !default.is_empty() {
+                        font_names.push(default.clone());
+                    }
+                }
+                if let Some(ref code) = fc.code {
+                    if !code.is_empty() {
+                        font_names.push(code.clone());
+                    }
+                }
+            }
+
+            // If no specific fonts configured, embed all found in directory
+            if font_names.is_empty() {
+                match crate::docx::font_embed::scan_font_dir(embed_dir) {
+                    Ok(families) => {
+                        let all_names: Vec<String> = families.keys().cloned().collect();
+                        let name_refs: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
+                        auto_embedded_fonts = crate::docx::font_embed::prepare_embedded_fonts(
+                            embed_dir, &name_refs,
+                        )
+                        .unwrap_or_default();
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Could not scan font directory {}: {}", embed_dir.display(), e);
+                        auto_embedded_fonts = Vec::new();
+                    }
+                }
+            } else {
+                let name_refs: Vec<&str> = font_names.iter().map(|s| s.as_str()).collect();
+                auto_embedded_fonts = crate::docx::font_embed::prepare_embedded_fonts(
+                    embed_dir, &name_refs,
+                )
+                .unwrap_or_default();
+            }
+            &auto_embedded_fonts
+        } else {
+            eprintln!("Warning: Font embed directory not found: {}", embed_dir.display());
+            auto_embedded_fonts = Vec::new();
+            &auto_embedded_fonts
+        }
+    } else {
+        auto_embedded_fonts = Vec::new();
+        &auto_embedded_fonts
+    };
+
+    let embedded_fonts_ref = if !effective_embedded.is_empty() {
+        // Add font content type
+        content_types.add_font_extension();
+
+        // Build fontTable.xml.rels
+        let mut font_table_rels = Relationships::new();
+        for font in effective_embedded {
+            font_table_rels.add_font_with_id(&font.rel_id, &font.filename);
+        }
+        packager.add_font_table_rels(&font_table_rels.to_xml()?)?;
+
+        // Add font files to archive
+        for font in effective_embedded {
+            packager.add_font(&font.filename, &font.data)?;
+        }
+
+        Some(effective_embedded as &[_])
+    } else {
+        None
+    };
+
+    let core_props = crate::docx::ooxml::CoreProperties::new();
+    let app_props = crate::docx::ooxml::AppProperties::new();
+    packager.package_with_props(
         &build_result.document,
         &styles,
         &content_types,
-        &rels,
-        &doc_rels,
+        &crate::docx::packager::RelContext {
+            root: &rels,
+            doc: &doc_rels,
+        },
         lang,
+        &crate::docx::packager::DocProps {
+            core: &core_props,
+            app: &app_props,
+        },
+        embedded_fonts_ref,
     )?;
 
     // Track media files already added to avoid duplicates

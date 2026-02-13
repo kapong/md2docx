@@ -20,13 +20,15 @@ title = "Table of Contents / สารบัญ"
 
 [fonts]
 default = "TH Sarabun New"
-code = "Consolas"
+code = "IBM Plex Sans Thai"
 normal_based_size = 14
 normal_based_color = "#000000"
 h1_based_color = "#000080"
 caption_based_color = "#000000"
 caption_based_size = 12
-code_based_size = 10
+code_based_size = 9
+embed = true
+embed_dir = "template/fonts"
 
 [code]
 theme = "light"

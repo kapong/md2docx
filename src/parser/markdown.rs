@@ -33,6 +33,16 @@ static TABLE_CAPTION_NO_ID_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^Table:\s*(.*)$").expect("TABLE_CAPTION_NO_ID_PATTERN regex should be valid")
 });
 
+/// Matches `<!-- {font:FontName} -->` to start a font override region
+static FONT_GROUP_START: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"<!--\s*\{font:([^}]+)\}\s*-->"#).expect("FONT_GROUP_START regex should be valid")
+});
+
+/// Matches `<!-- {/font} -->` to end a font override region
+static FONT_GROUP_END: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"<!--\s*\{/font\}\s*-->"#).expect("FONT_GROUP_END regex should be valid")
+});
+
 /// Builder for footnote definitions
 struct FootnoteBuilder {
     name: String,
@@ -542,34 +552,45 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     }
                     TagEnd::Emphasis => {
                         if let Some(InlineBuilder::Italic(content)) = inline_stack.pop() {
-                            if let Some(table) = table_builder.as_mut() {
-                                table.current_cell.push(Inline::Italic(content));
+                            let result = Inline::Italic(content);
+                            // If there's a parent builder on the stack (e.g. Bold wrapping Italic),
+                            // add as child to it instead of current_inlines
+                            if let Some(parent) = inline_stack.last_mut() {
+                                parent.add_child(result);
+                            } else if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(result);
                             } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
-                                list_item_inlines.push(Inline::Italic(content));
+                                list_item_inlines.push(result);
                             } else {
-                                add_inline(&mut current_inlines, Inline::Italic(content));
+                                add_inline(&mut current_inlines, result);
                             }
                         }
                     }
                     TagEnd::Strong => {
                         if let Some(InlineBuilder::Bold(content)) = inline_stack.pop() {
-                            if let Some(table) = table_builder.as_mut() {
-                                table.current_cell.push(Inline::Bold(content));
+                            let result = Inline::Bold(content);
+                            if let Some(parent) = inline_stack.last_mut() {
+                                parent.add_child(result);
+                            } else if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(result);
                             } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
-                                list_item_inlines.push(Inline::Bold(content));
+                                list_item_inlines.push(result);
                             } else {
-                                add_inline(&mut current_inlines, Inline::Bold(content));
+                                add_inline(&mut current_inlines, result);
                             }
                         }
                     }
                     TagEnd::Strikethrough => {
                         if let Some(InlineBuilder::Strikethrough(content)) = inline_stack.pop() {
-                            if let Some(table) = table_builder.as_mut() {
-                                table.current_cell.push(Inline::Strikethrough(content));
+                            let result = Inline::Strikethrough(content);
+                            if let Some(parent) = inline_stack.last_mut() {
+                                parent.add_child(result);
+                            } else if let Some(table) = table_builder.as_mut() {
+                                table.current_cell.push(result);
                             } else if !list_stack.is_empty() && !matches!(current_block, Some(BlockBuilder::Paragraph(_)) | Some(BlockBuilder::Heading { .. })) {
-                                list_item_inlines.push(Inline::Strikethrough(content));
+                                list_item_inlines.push(result);
                             } else {
-                                add_inline(&mut current_inlines, Inline::Strikethrough(content));
+                                add_inline(&mut current_inlines, result);
                             }
                         }
                     }
@@ -782,16 +803,17 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                 } else if let Some(block) = current_block.as_mut() {
                     match block {
                         BlockBuilder::Heading { .. } | BlockBuilder::Paragraph(_) => {
-                            // Soft break becomes a space (or ignored for Thai if we implement it)
-                            // For now, Word handles wrapping, so we convert soft break to space
-                            // to prevent words from sticking together, unless it's Thai text?
-                            // Actually, standard markdown behavior is soft break -> space or newline.
-                            // Let's stick to space for now to match CommonMark.
-                            add_text_to_inline_stack(
-                                &mut inline_stack,
-                                &mut current_inlines,
-                                " ".to_string(),
-                            );
+                            // Inside a blockquote, preserve soft breaks as line breaks
+                            // so the DOCX builder can render them as <w:br/>
+                            if block_stack.iter().any(|b| matches!(b, BlockBuilder::BlockQuote(_))) {
+                                add_inline(&mut current_inlines, Inline::SoftBreak);
+                            } else {
+                                add_text_to_inline_stack(
+                                    &mut inline_stack,
+                                    &mut current_inlines,
+                                    " ".to_string(),
+                                );
+                            }
                         }
                         _ => {}
                     }
@@ -918,6 +940,9 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
 
     // Process include directives
     let blocks = process_include_directives(blocks);
+
+    // Process font group directives: <!-- {font:Name} --> ... <!-- {/font} -->
+    let blocks = process_font_groups(blocks);
 
     ParsedDocument {
         frontmatter: None,
@@ -1114,6 +1139,101 @@ fn process_include_directives(blocks: Vec<Block>) -> Vec<Block> {
             }
         })
         .collect()
+}
+
+/// Process font group directives in a list of blocks.
+///
+/// Scans for `<!-- {font:FontName} -->` and `<!-- {/font} -->` HTML blocks,
+/// then wraps all blocks between them into `Block::FontGroup { font, blocks }`.
+/// Supports nesting and recursively processes inner blocks (blockquotes, lists, etc.).
+fn process_font_groups(blocks: Vec<Block>) -> Vec<Block> {
+    let mut result = Vec::new();
+    let mut iter = blocks.into_iter().peekable();
+
+    while let Some(block) = iter.next() {
+        match &block {
+            Block::Html(html) => {
+                if let Some(cap) = FONT_GROUP_START.captures(html.trim()) {
+                    let font_name = cap
+                        .get(1)
+                        .expect("FONT_GROUP_START should have capture group 1")
+                        .as_str()
+                        .trim()
+                        .to_string();
+
+                    // Collect all blocks until the matching <!-- {/font} -->
+                    let mut group_blocks = Vec::new();
+                    let mut depth = 1u32;
+
+                    for inner_block in iter.by_ref() {
+                        match &inner_block {
+                            Block::Html(inner_html) => {
+                                if FONT_GROUP_START.is_match(inner_html.trim()) {
+                                    depth += 1;
+                                    group_blocks.push(inner_block);
+                                } else if FONT_GROUP_END.is_match(inner_html.trim()) {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break; // Found matching end tag
+                                    }
+                                    group_blocks.push(inner_block);
+                                } else {
+                                    group_blocks.push(inner_block);
+                                }
+                            }
+                            _ => group_blocks.push(inner_block),
+                        }
+                    }
+
+                    // Recursively process font groups within this group
+                    let group_blocks = process_font_groups(group_blocks);
+
+                    result.push(Block::FontGroup {
+                        font: font_name,
+                        blocks: group_blocks,
+                    });
+                } else if FONT_GROUP_END.is_match(html.trim()) {
+                    // Stray end tag without matching start — skip it
+                    eprintln!("Warning: Found <!-- {{/font}} --> without matching <!-- {{font:...}} -->");
+                } else {
+                    result.push(block);
+                }
+            }
+            // Recursively process font groups inside blockquotes
+            Block::BlockQuote(inner) => {
+                result.push(Block::BlockQuote(process_font_groups(inner.clone())));
+            }
+            // Recursively process font groups inside list items
+            Block::List {
+                ordered,
+                start,
+                items,
+            } => {
+                let processed_items = items
+                    .iter()
+                    .map(|item| ListItem {
+                        content: process_font_groups(item.content.clone()),
+                        checked: item.checked,
+                    })
+                    .collect();
+                result.push(Block::List {
+                    ordered: *ordered,
+                    start: *start,
+                    items: processed_items,
+                });
+            }
+            // Recursively process inside existing font groups
+            Block::FontGroup { font, blocks } => {
+                result.push(Block::FontGroup {
+                    font: font.clone(),
+                    blocks: process_font_groups(blocks.clone()),
+                });
+            }
+            _ => result.push(block),
+        }
+    }
+
+    result
 }
 
 /// Process inlines to extract cross-references from text
@@ -1436,6 +1556,21 @@ impl InlineBuilder {
                 text: link_text, ..
             } => link_text.push(Inline::Text(text)),
             InlineBuilder::Image { alt, .. } => alt.push_str(&text),
+        }
+    }
+
+    /// Add an inline child element to this builder
+    fn add_child(&mut self, inline: Inline) {
+        match self {
+            InlineBuilder::Italic(content) => content.push(inline),
+            InlineBuilder::Bold(content) => content.push(inline),
+            InlineBuilder::Strikethrough(content) => content.push(inline),
+            InlineBuilder::Link {
+                text: link_text, ..
+            } => link_text.push(inline),
+            InlineBuilder::Image { .. } => {
+                // Images only support alt text, ignore inline children
+            }
         }
     }
 }

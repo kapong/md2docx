@@ -281,6 +281,18 @@ impl Relationships {
         });
     }
 
+    /// Add embedded font relationship (for fontTable.xml.rels)
+    pub fn add_font_with_id(&mut self, id: &str, filename: &str) {
+        self.add(Relationship {
+            id: id.to_string(),
+            rel_type:
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font"
+                    .to_string(),
+            target: format!("fonts/{}", filename),
+            target_mode: None,
+        });
+    }
+
     /// Generate XML content
     pub fn to_xml(&self) -> Result<Vec<u8>> {
         let mut writer = Writer::new(Cursor::new(Vec::new()));

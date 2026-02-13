@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-02-13
+
+### Fixed
+- Code block content no longer modified by image path resolution
+- Image width examples now reference existing files
+- Table cell text alignment applied correctly via paragraph properties
+- Nested blockquotes now have increasing indentation per nesting level
+- Soft breaks in blockquotes preserved as line breaks instead of spaces
+- Bold and italic formatting now works for Thai (Complex Script) text via w:bCs/w:iCs
+- Nested inline formatting (e.g. ***bold+italic***) now renders correctly
+- Heading styles now apply bold/italic to Complex Script (Thai) text
+
 ## [0.1.8] - 2026-02-12
 
 ### Added

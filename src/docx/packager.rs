@@ -84,6 +84,7 @@ impl<W: Write + Seek> Packager<W> {
                 core: &core_props,
                 app: &app_props,
             },
+            None,
         )
     }
 
@@ -96,6 +97,7 @@ impl<W: Write + Seek> Packager<W> {
         rels: &RelContext,
         lang: Language,
         props: &DocProps,
+        embedded_fonts: Option<&[crate::docx::font_embed::EmbeddedFont]>,
     ) -> Result<()> {
         // 1. [Content_Types].xml - Defines content types for all parts
         self.write_file("[Content_Types].xml", &content_types.to_xml()?)?;
@@ -118,8 +120,11 @@ impl<W: Write + Seek> Packager<W> {
         // 7. word/settings.xml - Document settings
         self.write_file("word/settings.xml", &generate_settings_xml()?)?;
 
-        // 8. word/fontTable.xml - Font table
-        self.write_file("word/fontTable.xml", &generate_font_table_xml(lang)?)?;
+        // 8. word/fontTable.xml - Font table (with optional embedded font references)
+        self.write_file(
+            "word/fontTable.xml",
+            &generate_font_table_xml(lang, embedded_fonts)?,
+        )?;
 
         // 9. word/webSettings.xml - Web settings (required for Word compatibility)
         self.write_file("word/webSettings.xml", &generate_web_settings_xml()?)?;
@@ -196,6 +201,19 @@ impl<W: Write + Seek> Packager<W> {
     /// Add an endnotes file to the archive
     pub fn add_endnotes(&mut self, content: &[u8]) -> Result<()> {
         self.write_file("word/endnotes.xml", content)?;
+        Ok(())
+    }
+
+    /// Add an embedded font file to the archive
+    pub fn add_font(&mut self, filename: &str, content: &[u8]) -> Result<()> {
+        let path = format!("word/fonts/{}", filename);
+        self.write_file(&path, content)?;
+        Ok(())
+    }
+
+    /// Add fontTable.xml.rels relationships file for embedded fonts
+    pub fn add_font_table_rels(&mut self, content: &[u8]) -> Result<()> {
+        self.write_file("word/_rels/fontTable.xml.rels", content)?;
         Ok(())
     }
 

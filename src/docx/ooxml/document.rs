@@ -216,14 +216,16 @@ impl Run {
                 writer.write_event(Event::Empty(fonts))?;
             }
 
-            // 3. Bold
+            // 3. Bold (w:b for Western, w:bCs for Complex Script)
             if self.bold {
                 writer.write_event(Event::Empty(BytesStart::new("w:b")))?;
+                writer.write_event(Event::Empty(BytesStart::new("w:bCs")))?;
             }
 
-            // 4. Italic
+            // 4. Italic (w:i for Western, w:iCs for Complex Script)
             if self.italic {
                 writer.write_event(Event::Empty(BytesStart::new("w:i")))?;
+                writer.write_event(Event::Empty(BytesStart::new("w:iCs")))?;
             }
 
             // 4b. Complex Script flag (w:cs) - enables Thai word-break/wrapping

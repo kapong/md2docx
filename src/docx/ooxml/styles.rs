@@ -371,6 +371,16 @@ impl StylesDocument {
             .unwrap_or_else(|| self.lang.default_ascii_font().to_string())
     }
 
+    /// Get the Complex Script font — uses the configured default font so that
+    /// embedded fonts are applied to Thai / CS text as well as Latin text.
+    fn get_cs_font(&self) -> String {
+        self.font_config
+            .as_ref()
+            .and_then(|c| c.default.as_ref())
+            .cloned()
+            .unwrap_or_else(|| self.lang.default_cs_font().to_string())
+    }
+
     fn get_code_font(&self) -> String {
         self.font_config
             .as_ref()
@@ -435,6 +445,7 @@ impl StylesDocument {
     /// Add all required styles
     fn add_default_styles(&mut self) {
         let ascii_font = self.get_ascii_font();
+        let cs_font = self.get_cs_font();
         let code_font = self.get_code_font();
         let normal_size = self.get_normal_size();
         let normal_color = self.get_normal_color();
@@ -453,7 +464,7 @@ impl StylesDocument {
         self.add_style(
             Style::new("Normal", "Normal", StyleType::Paragraph)
                 .ui_priority(0)
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .color(&normal_color)
@@ -477,7 +488,7 @@ impl StylesDocument {
                 normal_size * 2 + 14,
             ),
             Language::Thai => (
-                self.lang.default_cs_font().to_string(),
+                cs_font.clone(),
                 normal_size + 44, // Relative to normal (e.g. 28 + 44 = 72)
                 normal_size + 44,
             ),
@@ -486,7 +497,7 @@ impl StylesDocument {
             Style::new("Title", "Title", StyleType::Paragraph)
                 .ui_priority(10)
                 .based_on("Normal")
-                .font(&title_font, &title_font, self.lang.default_cs_font())
+                .font(&title_font, &title_font, &cs_font)
                 .size(title_size)
                 .size_cs(title_cs_size)
                 .bold()
@@ -499,7 +510,7 @@ impl StylesDocument {
             Style::new("Subtitle", "Subtitle", StyleType::Paragraph)
                 .ui_priority(11)
                 .based_on("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(subtitle_size)
                 .size_cs(subtitle_size)
                 .italic()
@@ -514,7 +525,7 @@ impl StylesDocument {
                 normal_size + 18,
             ),
             Language::Thai => (
-                self.lang.default_cs_font().to_string(),
+                cs_font.clone(),
                 normal_size + 12, // Relative: 28 + 12 = 40 (20pt)
                 normal_size + 12,
             ),
@@ -524,7 +535,7 @@ impl StylesDocument {
                 .ui_priority(9)
                 .based_on("Normal")
                 .next("Normal")
-                .font(&h1_font, &h1_font, self.lang.default_cs_font())
+                .font(&h1_font, &h1_font, &cs_font)
                 .size(h1_size)
                 .size_cs(h1_cs_size)
                 .bold()
@@ -541,7 +552,7 @@ impl StylesDocument {
                 normal_size + 10,
             ),
             Language::Thai => (
-                self.lang.default_cs_font().to_string(),
+                cs_font.clone(),
                 normal_size + 4, // Relative: 28 + 4 = 32 (16pt)
                 normal_size + 4,
             ),
@@ -551,7 +562,7 @@ impl StylesDocument {
                 .ui_priority(9)
                 .based_on("Heading1")
                 .next("Normal")
-                .font(&h2_font, &h2_font, self.lang.default_cs_font())
+                .font(&h2_font, &h2_font, &cs_font)
                 .size(h2_size)
                 .size_cs(h2_cs_size)
                 .bold()
@@ -568,7 +579,7 @@ impl StylesDocument {
                 normal_size + 6,
             ),
             Language::Thai => (
-                self.lang.default_cs_font().to_string(),
+                cs_font.clone(),
                 normal_size, // Relative: 28 (14pt)
                 normal_size,
             ),
@@ -578,7 +589,7 @@ impl StylesDocument {
                 .ui_priority(9)
                 .based_on("Heading2")
                 .next("Normal")
-                .font(&h3_font, &h3_font, self.lang.default_cs_font())
+                .font(&h3_font, &h3_font, &cs_font)
                 .size(h3_size)
                 .size_cs(h3_cs_size)
                 .bold()
@@ -608,7 +619,7 @@ impl StylesDocument {
                 .ui_priority(9)
                 .based_on("Heading3")
                 .next("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(h4_size)
                 .size_cs(h4_cs_size)
                 .italic()
@@ -645,7 +656,7 @@ impl StylesDocument {
             Style::new("Quote", "Quote", StyleType::Paragraph)
                 .ui_priority(29)
                 .based_on("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .italic()
@@ -658,7 +669,7 @@ impl StylesDocument {
             Style::new("Caption", "Caption", StyleType::Paragraph)
                 .ui_priority(35)
                 .based_on("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(caption_size)
                 .size_cs(caption_size)
                 .color(&caption_color)
@@ -673,7 +684,7 @@ impl StylesDocument {
                 .ui_priority(39)
                 .based_on("Heading1")
                 .next("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(toc_heading_size)
                 .size_cs(toc_heading_size)
                 .bold()
@@ -689,7 +700,7 @@ impl StylesDocument {
                 .ui_priority(39)
                 .based_on("Normal")
                 .next("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .add_tab(TabStop::right_aligned_with_dots(TOC_TAB_POSITION))
@@ -701,7 +712,7 @@ impl StylesDocument {
                 .ui_priority(39)
                 .based_on("Normal")
                 .next("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .add_tab(TabStop::right_aligned_with_dots(TOC_TAB_POSITION))
@@ -714,7 +725,7 @@ impl StylesDocument {
                 .ui_priority(39)
                 .based_on("Normal")
                 .next("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .add_tab(TabStop::right_aligned_with_dots(TOC_TAB_POSITION))
@@ -732,7 +743,7 @@ impl StylesDocument {
             Style::new("FootnoteText", "Footnote Text", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(footnote_size)
                 .size_cs(footnote_size)
                 .spacing(60, 60),
@@ -742,7 +753,7 @@ impl StylesDocument {
         self.add_style(
             Style::new("Hyperlink", "Hyperlink", StyleType::Character)
                 .ui_priority(99)
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .color("0563C1") // Word hyperlink blue
@@ -754,7 +765,7 @@ impl StylesDocument {
             Style::new("ListParagraph", "List Paragraph", StyleType::Paragraph)
                 .ui_priority(34)
                 .based_on("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .spacing(60, 60),
@@ -769,7 +780,7 @@ impl StylesDocument {
             Style::new("Header", "header", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .add_tab(TabStop {
@@ -790,7 +801,7 @@ impl StylesDocument {
             Style::new("Footer", "footer", StyleType::Paragraph)
                 .ui_priority(99)
                 .based_on("Normal")
-                .font(&ascii_font, &ascii_font, self.lang.default_cs_font())
+                .font(&ascii_font, &ascii_font, &cs_font)
                 .size(normal_size)
                 .size_cs(normal_size_cs)
                 .add_tab(TabStop {
@@ -894,10 +905,11 @@ impl StylesDocument {
 
         // 1. Default fonts
         let ascii_font = self.get_ascii_font();
+        let cs_font = self.get_cs_font();
         let mut fonts = BytesStart::new("w:rFonts");
         fonts.push_attribute(("w:ascii", ascii_font.as_str()));
         fonts.push_attribute(("w:hAnsi", ascii_font.as_str()));
-        fonts.push_attribute(("w:cs", self.lang.default_cs_font()));
+        fonts.push_attribute(("w:cs", cs_font.as_str()));
         writer.write_event(Event::Empty(fonts))?;
 
         // 2. Default size
@@ -1182,14 +1194,16 @@ impl StylesDocument {
             writer.write_event(Event::Empty(fonts))?;
         }
 
-        // 2. Bold
+        // 2. Bold (w:b for Western, w:bCs for Complex Script e.g. Thai)
         if style.bold {
             writer.write_event(Event::Empty(BytesStart::new("w:b")))?;
+            writer.write_event(Event::Empty(BytesStart::new("w:bCs")))?;
         }
 
-        // 3. Italic
+        // 3. Italic (w:i for Western, w:iCs for Complex Script e.g. Thai)
         if style.italic {
             writer.write_event(Event::Empty(BytesStart::new("w:i")))?;
+            writer.write_event(Event::Empty(BytesStart::new("w:iCs")))?;
         }
 
         // 4. Underline
@@ -1496,7 +1510,19 @@ pub fn generate_settings_xml() -> Result<Vec<u8>> {
 }
 
 /// Generate word/fontTable.xml
-pub fn generate_font_table_xml(_lang: Language) -> Result<Vec<u8>> {
+///
+/// If `embedded_fonts` is provided, adds `w:embedRegular`/`w:embedBold`/etc. references
+/// to the font entries for fonts that have embedded files.
+pub fn generate_font_table_xml(
+    _lang: Language,
+    embedded_fonts: Option<&[crate::docx::font_embed::EmbeddedFont]>,
+) -> Result<Vec<u8>> {
+    use crate::docx::font_embed::{group_by_font_name, EmbeddedFont};
+
+    let embedded_map = embedded_fonts
+        .map(|fonts| group_by_font_name(fonts))
+        .unwrap_or_default();
+
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
     // XML declaration with standalone="yes" (required by Word)
@@ -1518,101 +1544,138 @@ pub fn generate_font_table_xml(_lang: Language) -> Result<Vec<u8>> {
     ));
     writer.write_event(Event::Start(root))?;
 
-    // Calibri
-    writer.write_event(Event::Start(BytesStart::new("w:font")))?;
-    {
-        let mut name = BytesStart::new("w:name");
-        name.push_attribute(("w:val", "Calibri"));
-        writer.write_event(Event::Empty(name))?;
+    /// Helper: write a single font entry with optional embedding
+    fn write_font_entry<W: std::io::Write>(
+        writer: &mut Writer<W>,
+        name: &str,
+        panose: Option<&str>,
+        charset: &str,
+        family: &str,
+        pitch: &str,
+        embeds: Option<&Vec<&EmbeddedFont>>,
+        sig: Option<(u32, u32, u32, u32, u32, u32)>,
+    ) -> Result<()> {
+        let mut font_elem = BytesStart::new("w:font");
+        font_elem.push_attribute(("w:name", name));
+        writer.write_event(Event::Start(font_elem))?;
 
-        let mut panose = BytesStart::new("w:panose1");
-        panose.push_attribute(("w:val", "020F0502020204030204"));
-        writer.write_event(Event::Empty(panose))?;
+        if let Some(panose_val) = panose {
+            let mut p = BytesStart::new("w:panose1");
+            p.push_attribute(("w:val", panose_val));
+            writer.write_event(Event::Empty(p))?;
+        }
 
-        let mut charset = BytesStart::new("w:charset");
-        charset.push_attribute(("w:val", "00"));
-        writer.write_event(Event::Empty(charset))?;
+        let mut cs = BytesStart::new("w:charset");
+        cs.push_attribute(("w:val", charset));
+        writer.write_event(Event::Empty(cs))?;
 
-        let mut family = BytesStart::new("w:family");
-        family.push_attribute(("w:val", "swiss"));
-        writer.write_event(Event::Empty(family))?;
+        let mut fam = BytesStart::new("w:family");
+        fam.push_attribute(("w:val", family));
+        writer.write_event(Event::Empty(fam))?;
 
-        let mut pitch = BytesStart::new("w:pitch");
-        pitch.push_attribute(("w:val", "variable"));
-        writer.write_event(Event::Empty(pitch))?;
+        let mut p = BytesStart::new("w:pitch");
+        p.push_attribute(("w:val", pitch));
+        writer.write_event(Event::Empty(p))?;
+
+        // Write Unicode/CodePage signature if available
+        if let Some((usb0, usb1, usb2, usb3, csb0, csb1)) = sig {
+            let mut sig_elem = BytesStart::new("w:sig");
+            sig_elem.push_attribute(("w:usb0", format!("{:08X}", usb0).as_str()));
+            sig_elem.push_attribute(("w:usb1", format!("{:08X}", usb1).as_str()));
+            sig_elem.push_attribute(("w:usb2", format!("{:08X}", usb2).as_str()));
+            sig_elem.push_attribute(("w:usb3", format!("{:08X}", usb3).as_str()));
+            sig_elem.push_attribute(("w:csb0", format!("{:08X}", csb0).as_str()));
+            sig_elem.push_attribute(("w:csb1", format!("{:08X}", csb1).as_str()));
+            writer.write_event(Event::Empty(sig_elem))?;
+        }
+
+        // Write embed references if this font has embedded files
+        if let Some(font_embeds) = embeds {
+            for embed in font_embeds {
+                let mut embed_elem = BytesStart::new(embed.variant.xml_element());
+                embed_elem.push_attribute(("r:id", embed.rel_id.as_str()));
+                embed_elem.push_attribute(("w:fontKey", format!("{{{}}}", embed.guid).as_str()));
+                writer.write_event(Event::Empty(embed_elem))?;
+            }
+        }
+
+        writer.write_event(Event::End(BytesEnd::new("w:font")))?;
+        Ok(())
     }
-    writer.write_event(Event::End(BytesEnd::new("w:font")))?;
 
-    // Calibri Light
-    writer.write_event(Event::Start(BytesStart::new("w:font")))?;
-    {
-        let mut name = BytesStart::new("w:name");
-        name.push_attribute(("w:val", "Calibri Light"));
-        writer.write_event(Event::Empty(name))?;
+    write_font_entry(
+        &mut writer,
+        "Calibri",
+        Some("020F0502020204030204"),
+        "00",
+        "swiss",
+        "variable",
+        embedded_map.get("Calibri"),
+        Some((0xE4002EFF, 0xC000247B, 0x00000009, 0x00000000, 0x000001FF, 0x00000000)),
+    )?;
 
-        let mut panose = BytesStart::new("w:panose1");
-        panose.push_attribute(("w:val", "020F0302020204030204"));
-        writer.write_event(Event::Empty(panose))?;
+    write_font_entry(
+        &mut writer,
+        "Calibri Light",
+        Some("020F0302020204030204"),
+        "00",
+        "swiss",
+        "variable",
+        embedded_map.get("Calibri Light"),
+        Some((0xE4002EFF, 0xC000247B, 0x00000009, 0x00000000, 0x000001FF, 0x00000000)),
+    )?;
 
-        let mut charset = BytesStart::new("w:charset");
-        charset.push_attribute(("w:val", "00"));
-        writer.write_event(Event::Empty(charset))?;
+    write_font_entry(
+        &mut writer,
+        "Consolas",
+        Some("020B0609020204030204"),
+        "00",
+        "modern",
+        "fixed",
+        embedded_map.get("Consolas"),
+        Some((0xE00006FF, 0x0000FCFF, 0x00000001, 0x00000000, 0x0000019F, 0x00000000)),
+    )?;
 
-        let mut family = BytesStart::new("w:family");
-        family.push_attribute(("w:val", "swiss"));
-        writer.write_event(Event::Empty(family))?;
+    write_font_entry(
+        &mut writer,
+        "TH Sarabun New",
+        Some("020B0500040200020003"),
+        "DE",
+        "swiss",
+        "variable",
+        embedded_map.get("TH Sarabun New"),
+        Some((0xA100006F, 0x5000205A, 0x00000000, 0x00000000, 0x60010183, 0x80000000)),
+    )?;
 
-        let mut pitch = BytesStart::new("w:pitch");
-        pitch.push_attribute(("w:val", "variable"));
-        writer.write_event(Event::Empty(pitch))?;
+    // Write any additionally embedded fonts not already in the standard list
+    let standard_fonts = ["Calibri", "Calibri Light", "Consolas", "TH Sarabun New"];
+    for (font_name, embeds) in &embedded_map {
+        if !standard_fonts.contains(&font_name.as_str()) {
+            // Extract metrics from the first font variant in the group
+            let metrics = embeds.iter().find_map(|e| e.metrics.as_ref());
+            let (panose, charset, family, pitch, sig) = if let Some(m) = metrics {
+                (
+                    Some(m.panose.as_str()),
+                    m.charset.as_str(),
+                    m.family.as_str(),
+                    m.pitch.as_str(),
+                    Some((m.usb0, m.usb1, m.usb2, m.usb3, m.csb0, m.csb1)),
+                )
+            } else {
+                (None, "00", "auto", "variable", None)
+            };
+            write_font_entry(
+                &mut writer,
+                font_name,
+                panose,
+                charset,
+                family,
+                pitch,
+                Some(embeds),
+                sig,
+            )?;
+        }
     }
-    writer.write_event(Event::End(BytesEnd::new("w:font")))?;
-
-    // Consolas
-    writer.write_event(Event::Start(BytesStart::new("w:font")))?;
-    {
-        let mut name = BytesStart::new("w:name");
-        name.push_attribute(("w:val", "Consolas"));
-        writer.write_event(Event::Empty(name))?;
-
-        let mut panose = BytesStart::new("w:panose1");
-        panose.push_attribute(("w:val", "020B0609020204030204"));
-        writer.write_event(Event::Empty(panose))?;
-
-        let mut charset = BytesStart::new("w:charset");
-        charset.push_attribute(("w:val", "00"));
-        writer.write_event(Event::Empty(charset))?;
-
-        let mut family = BytesStart::new("w:family");
-        family.push_attribute(("w:val", "modern"));
-        writer.write_event(Event::Empty(family))?;
-
-        let mut pitch = BytesStart::new("w:pitch");
-        pitch.push_attribute(("w:val", "fixed"));
-        writer.write_event(Event::Empty(pitch))?;
-    }
-    writer.write_event(Event::End(BytesEnd::new("w:font")))?;
-
-    // TH Sarabun New (Thai font)
-    writer.write_event(Event::Start(BytesStart::new("w:font")))?;
-    {
-        let mut name = BytesStart::new("w:name");
-        name.push_attribute(("w:val", "TH Sarabun New"));
-        writer.write_event(Event::Empty(name))?;
-
-        let mut charset = BytesStart::new("w:charset");
-        charset.push_attribute(("w:val", "00"));
-        writer.write_event(Event::Empty(charset))?;
-
-        let mut family = BytesStart::new("w:family");
-        family.push_attribute(("w:val", "auto"));
-        writer.write_event(Event::Empty(family))?;
-
-        let mut pitch = BytesStart::new("w:pitch");
-        pitch.push_attribute(("w:val", "variable"));
-        writer.write_event(Event::Empty(pitch))?;
-    }
-    writer.write_event(Event::End(BytesEnd::new("w:font")))?;
 
     // Close root
     writer.write_event(Event::End(BytesEnd::new("w:fonts")))?;
@@ -2050,7 +2113,7 @@ mod tests {
 
     #[test]
     fn test_generate_font_table_xml() {
-        let xml = generate_font_table_xml(Language::Thai).unwrap();
+        let xml = generate_font_table_xml(Language::Thai, None).unwrap();
         assert!(!xml.is_empty());
 
         let xml_str = String::from_utf8(xml).unwrap();

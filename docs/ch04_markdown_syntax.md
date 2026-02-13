@@ -136,12 +136,12 @@ Use `println!()` for output / ใช้ `println!()` สำหรับแสด
 ### Inline Links / ลิงก์แบบ Inline
 
 ```markdown
-Visit [md2docx website](https://github.com/pong/md2docx) for more info.
-เยี่ยมชม [เว็บไซต์ md2docx](https://github.com/pong/md2docx) สำหรับข้อมูลเพิ่มเติม
+Visit [md2docx website](https://github.com/kapong/md2docx) for more info.
+เยี่ยมชม [เว็บไซต์ md2docx](https://github.com/kapong/md2docx) สำหรับข้อมูลเพิ่มเติม
 ```
 
-Visit [md2docx website](https://github.com/pong/md2docx) for more info.
-เยี่ยมชม [เว็บไซต์ md2docx](https://github.com/pong/md2docx) สำหรับข้อมูลเพิ่มเติม
+Visit [md2docx website](https://github.com/kapong/md2docx) for more info.
+เยี่ยมชม [เว็บไซต์ md2docx](https://github.com/kapong/md2docx) สำหรับข้อมูลเพิ่มเติม
 
 ### Reference Links / ลิงก์แบบ Reference
 
@@ -177,12 +177,18 @@ See page [{PAGENUM}](#images) for image examples.
 ![Logo / โลโก้](assets/logo.png)
 ```
 
+![Logo / โลโก้](assets/logo.png)
+
 ### Image with Width / รูปภาพพร้อมความกว้าง
 
 ```markdown
-![Diagram / แผนภาพ](assets/diagram.png){width=80%}
-![Small Icon / ไอคอนเล็ก](assets/icon.png){width=100px}
+![Diagram / แผนภาพ](assets/image.png){width=80%}
+![Small Icon / ไอคอนเล็ก](assets/image.png){width=100px}
 ```
+
+![Diagram / แผนภาพ](assets/example.png){width=80%}
+
+![Small Icon / ไอคอนเล็ก](assets/logo.png){width=100px}
 
 ## Tables / ตาราง
 
@@ -198,9 +204,9 @@ See page [{PAGENUM}](#images) for image examples.
 
 | Name / ชื่อ | Email / อีเมล | Role / บทบาท |
 |-------------|--------------|-------------|
-| John | john@example.com | Admin |
-| Jane | jane@example.com | User |
-| สมชาย | somchai@example.com | ผู้ดูแล |
+| John | <john@example.com> | Admin |
+| Jane | <jane@example.com> | User |
+| สมชาย | <somchai@example.com> | ผู้ดูแล |
 
 ### Aligned Table / ตารางจัดตำแหน่ง
 
@@ -220,14 +226,16 @@ See page [{PAGENUM}](#images) for image examples.
 
 ### Basic Code Block / บล็อกโค้ดพื้นฐาน
 
-```markdown
+````markdown
 ```rust
 fn main() {
     println!("Hello, World!");
     println!("สวัสดีชาวโลก!");
 }
-```
-```
+````
+
+
+```text
 
 ```rust
 fn main() {
@@ -238,12 +246,14 @@ fn main() {
 
 ### Code Block with Filename / บล็อกโค้ดพร้อมชื่อไฟล์
 
-```markdown
+````markdown
 ```python,filename=hello.py
 print("Hello, World!")
 print("สวัสดีชาวโลก!")
-```
-```
+````
+
+
+```text
 
 ### Code Block with Line Numbers / บล็อกโค้ดพร้อมหมายเลขบรรทัด
 
@@ -254,7 +264,9 @@ fn main() {
     println!("Hello, {}!", name);
 }
 ```
-```
+
+
+```text
 
 ### Code Block with Line Highlighting / บล็อกโค้ดพร้อมไฮไลท์บรรทัด
 
@@ -266,7 +278,9 @@ def greet(name):
     print("To our app")       # Highlighted
     print("Enjoy!")           # Highlighted
 ```
-```
+
+
+```text
 
 ## Blockquotes / ข้อความอ้างอิง
 
@@ -364,7 +378,7 @@ Create diagrams using Mermaid syntax:
 
 สร้างแผนภาพโดยใช้ไวยากรณ์ Mermaid:
 
-```markdown
+````markdown
 ```mermaid
 flowchart LR
     A[Start / เริ่ม] --> B{Decision / ตัดสินใจ}
@@ -372,8 +386,10 @@ flowchart LR
     B -->|No / ไม่| D[Action 2 / การกระทำ 2]
     C --> E[End / จบ]
     D --> E
-```
-```
+````
+
+
+```text
 
 ## Math Equations / สมการคณิตศาสตร์
 
@@ -435,6 +451,7 @@ md2docx รองรับไวยากรณ์ Markdown ทั่วไป�
 | Headings / หัวข้อ | `#` to `######` |
 | Bold / หนา | `**text**` |
 | Italic / เอียง | `*text*` |
+
 | Code / โค้ด | `` `code` `` |
 | Lists / รายการ | `-` or `1.` |
 | Links / ลิงก์ | `[text](url)` |

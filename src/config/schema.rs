@@ -246,6 +246,10 @@ pub struct FontsSection {
     pub caption_based_size: u32,
     pub caption_based_color: String,
     pub code_based_size: u32,
+    /// Enable font embedding in the generated DOCX
+    pub embed: bool,
+    /// Directory containing .ttf/.otf font files to embed
+    pub embed_dir: Option<PathBuf>,
 }
 
 impl Default for FontsSection {
@@ -259,6 +263,8 @@ impl Default for FontsSection {
             caption_based_size: 9,
             caption_based_color: "#000000".to_string(),
             code_based_size: 10,
+            embed: false,
+            embed_dir: None,
         }
     }
 }

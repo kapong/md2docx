@@ -1,4 +1,5 @@
 pub(crate) mod builder;
+pub mod font_embed;
 pub(crate) mod highlight;
 pub mod image_utils;
 pub(crate) mod math;

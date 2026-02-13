@@ -223,9 +223,24 @@ fn write_abstract_num_bullet<W: std::io::Write>(writer: &mut Writer<W>, id: u32)
     writer.write_event(Event::Empty(tmpl))?;
 
     // Define levels 0-8 for nesting
-    let bullets = ["•", "○", "▪", "•", "○", "▪", "•", "○", "▪"];
+    // Use Word's standard bullet characters with fonts available on all Windows systems:
+    // - Level 0,3,6: Symbol font char \xF0B7 (solid bullet)
+    // - Level 1,4,7: Courier New "o" (open bullet)
+    // - Level 2,5,8: Wingdings char \xF0A7 (solid square)
+    let bullets: [(&str, &str); 9] = [
+        ("\u{F0B7}", "Symbol"),
+        ("o", "Courier New"),
+        ("\u{F0A7}", "Wingdings"),
+        ("\u{F0B7}", "Symbol"),
+        ("o", "Courier New"),
+        ("\u{F0A7}", "Wingdings"),
+        ("\u{F0B7}", "Symbol"),
+        ("o", "Courier New"),
+        ("\u{F0A7}", "Wingdings"),
+    ];
     for ilvl in 0..9u32 {
-        write_bullet_level(writer, ilvl, bullets[ilvl as usize])?;
+        let (bullet_char, bullet_font) = bullets[ilvl as usize];
+        write_bullet_level(writer, ilvl, bullet_char, bullet_font)?;
     }
 
     writer.write_event(Event::End(BytesEnd::new("w:abstractNum")))?;
@@ -237,6 +252,7 @@ fn write_bullet_level<W: std::io::Write>(
     writer: &mut Writer<W>,
     ilvl: u32,
     bullet: &str,
+    font: &str,
 ) -> Result<()> {
     let mut lvl = BytesStart::new("w:lvl");
     lvl.push_attribute(("w:ilvl", ilvl.to_string().as_str()));
@@ -280,13 +296,14 @@ fn write_bullet_level<W: std::io::Write>(
 
     writer.write_event(Event::End(BytesEnd::new("w:pPr")))?;
 
-    // Run properties (font for bullet)
+    // Run properties (font for bullet character)
     writer.write_event(Event::Start(BytesStart::new("w:rPr")))?;
 
-    // Use Symbol font for standard bullets
+    // Use the appropriate font for each bullet style
+    // Symbol, Courier New, and Wingdings are all built-in on Windows
     let mut fonts = BytesStart::new("w:rFonts");
-    fonts.push_attribute(("w:ascii", "Symbol"));
-    fonts.push_attribute(("w:hAnsi", "Symbol"));
+    fonts.push_attribute(("w:ascii", font));
+    fonts.push_attribute(("w:hAnsi", font));
     fonts.push_attribute(("w:hint", "default"));
     writer.write_event(Event::Empty(fonts))?;
 

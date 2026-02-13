@@ -424,6 +424,12 @@ pub struct DocumentConfig {
     pub base_path: Option<std::path::PathBuf>,
     /// Page layout configuration (dimensions and margins)
     pub page: Option<PageConfig>,
+    /// Embedded font files (pre-loaded, obfuscated) for font embedding
+    pub embedded_fonts: Vec<crate::docx::font_embed::EmbeddedFont>,
+    /// Directory containing .ttf/.otf font files to embed.
+    /// When set, fonts are automatically scanned and embedded from this directory.
+    /// If `embedded_fonts` is also populated, this field is ignored.
+    pub embed_dir: Option<std::path::PathBuf>,
 }
 
 /// Mapping of original relationship ID to media file content
@@ -559,6 +565,10 @@ pub(crate) fn build_document(
             table_count: &mut table_count,
             figure_count: &mut figure_count,
             lang,
+            font_override: None,
+            code_font: config.fonts.as_ref().and_then(|f| f.code.clone()),
+            code_size: config.fonts.as_ref().and_then(|f| f.code_size),
+            quote_level: 0,
         });
 
         // Insert blank paragraph before heading if previous block was not a heading
@@ -905,6 +915,10 @@ pub(crate) struct BuildContextParams<'a> {
     pub table_count: &'a mut u32,
     pub figure_count: &'a mut u32,
     pub lang: Language,
+    pub font_override: Option<String>,
+    pub code_font: Option<String>,
+    pub code_size: Option<u32>,
+    pub quote_level: usize,
 }
 
 /// Context for building a document, holding all tracked state
@@ -924,6 +938,10 @@ pub(crate) struct BuildContext<'a> {
     pub table_count: &'a mut u32,
     pub figure_count: &'a mut u32,
     pub lang: Language,
+    pub font_override: Option<String>,
+    pub code_font: Option<String>,
+    pub code_size: Option<u32>,
+    pub quote_level: usize,
 }
 
 impl<'a> BuildContext<'a> {
@@ -943,6 +961,10 @@ impl<'a> BuildContext<'a> {
             table_count: params.table_count,
             figure_count: params.figure_count,
             lang: params.lang,
+            font_override: params.font_override,
+            code_font: params.code_font,
+            code_size: params.code_size,
+            quote_level: params.quote_level,
         }
     }
 }
@@ -1081,7 +1103,7 @@ fn block_to_elements(
                     let caption_text = format!("{} {}: {}", prefix, number_str, alt);
 
                     let mut run = Run::new(&caption_text);
-                    run.font = Some(tmpl.caption.font_family.clone());
+                    run.font = Some(ctx.font_override.as_ref().unwrap_or(&tmpl.caption.font_family).clone());
                     run.size = Some(tmpl.caption.font_size);
                     run.color = Some(tmpl.caption.font_color.trim_start_matches('#').to_string());
                     run.bold = tmpl.caption.bold;
@@ -1105,6 +1127,22 @@ fn block_to_elements(
 
                     elements.push(DocElement::Paragraph(Box::new(caption_para)));
                 }
+            } else if !alt.is_empty() {
+                // No template — create a simple caption with alt text
+                let prefix = ctx.lang.figure_caption_prefix();
+                let number_str = figure_number.unwrap_or_else(|| {
+                    *ctx.figure_count += 1;
+                    ctx.figure_count.to_string()
+                });
+                let caption_text = format!("{} {}: {}", prefix, number_str, alt);
+                let mut run = Run::new(&caption_text);
+                if let Some(ref font) = ctx.font_override {
+                    run.font = Some(font.clone());
+                }
+                let caption_para = Paragraph::with_style("Caption")
+                    .add_run(run)
+                    .spacing(120, 120);
+                elements.push(DocElement::Paragraph(Box::new(caption_para)));
             }
 
             elements
@@ -1177,7 +1215,7 @@ fn block_to_elements(
                             let caption_text = format!("{} {}", prefix, number_str);
 
                             let mut run = Run::new(&caption_text);
-                            run.font = Some(tmpl.caption.font_family.clone());
+                            run.font = Some(ctx.font_override.as_ref().unwrap_or(&tmpl.caption.font_family).clone());
                             run.size = Some(tmpl.caption.font_size);
                             run.color =
                                 Some(tmpl.caption.font_color.trim_start_matches('#').to_string());
@@ -1266,7 +1304,7 @@ fn block_to_elements(
                 );
 
                 let mut run = Run::new(&caption_text);
-                run.font = Some(template.caption.font_family.clone());
+                run.font = Some(ctx.font_override.as_ref().unwrap_or(&template.caption.font_family).clone());
                 run.size = Some(template.caption.font_size);
                 run.color = Some(
                     template
@@ -1308,6 +1346,7 @@ fn block_to_elements(
 
         Block::BlockQuote(blocks) => {
             let mut result = Vec::new();
+            ctx.quote_level += 1;
             for nested_block in blocks {
                 let elements = block_to_elements(
                     nested_block,
@@ -1319,13 +1358,30 @@ fn block_to_elements(
                 for elem in elements {
                     match elem {
                         DocElement::Paragraph(mut p) => {
-                            p.style_id = Some("Quote".to_string());
+                            // Only apply quote styling to paragraphs not already
+                            // styled by a deeper nested blockquote
+                            if p.style_id.as_deref() != Some("Quote") {
+                                p.style_id = Some("Quote".to_string());
+                                p.indent_left = Some(ctx.quote_level as u32 * 720);
+                            }
                             result.push(DocElement::Paragraph(p));
                         }
                         other => result.push(other),
                     }
                 }
             }
+            ctx.quote_level -= 1;
+            result
+        }
+
+        Block::FontGroup { font, blocks } => {
+            let prev_override = ctx.font_override.clone();
+            ctx.font_override = Some(font.clone());
+            let mut result = Vec::new();
+            for block in blocks {
+                result.extend(block_to_elements(block, list_level, ctx, None, skip_toc));
+            }
+            ctx.font_override = prev_override;
             result
         }
 
@@ -1433,19 +1489,27 @@ fn block_to_paragraphs(
             filename.as_deref(),
             highlight_lines,
             *show_line_numbers,
+            ctx.code_font.as_deref(),
+            ctx.code_size,
         ),
 
         Block::BlockQuote(blocks) => {
             let mut paragraphs = Vec::new();
+            ctx.quote_level += 1;
             for nested_block in blocks {
                 let mut nested_paragraphs =
                     block_to_paragraphs(nested_block, list_level, ctx, skip_toc);
-                // Apply quote style to all nested paragraphs
+                // Only apply quote styling to paragraphs not already
+                // styled by a deeper nested blockquote
                 for p in &mut nested_paragraphs {
-                    p.style_id = Some("Quote".to_string());
+                    if p.style_id.as_deref() != Some("Quote") {
+                        p.style_id = Some("Quote".to_string());
+                        p.indent_left = Some(ctx.quote_level as u32 * 720);
+                    }
                 }
                 paragraphs.extend(nested_paragraphs);
             }
+            ctx.quote_level -= 1;
             paragraphs
         }
 
@@ -1473,9 +1537,20 @@ fn block_to_paragraphs(
             vec![]
         }
 
+        Block::FontGroup { font, blocks } => {
+            let prev_override = ctx.font_override.clone();
+            ctx.font_override = Some(font.clone());
+            let mut paragraphs = Vec::new();
+            for block in blocks {
+                paragraphs.extend(block_to_paragraphs(block, list_level, ctx, skip_toc));
+            }
+            ctx.font_override = prev_override;
+            paragraphs
+        }
+
         Block::Mermaid { content, .. } => {
             // This is a fallback case if block_to_elements falls back to block_to_paragraphs
-            code_block_to_paragraphs(content, Some("mermaid"), None, &Vec::new(), false)
+            code_block_to_paragraphs(content, Some("mermaid"), None, &Vec::new(), false, ctx.code_font.as_deref(), ctx.code_size)
         }
 
         Block::Include { resolved, .. } => {
@@ -1743,9 +1818,7 @@ fn create_table_cell_with_template(
         }
     }
 
-    let mut cell = TableCellElement::new().width(params.width).add_paragraph(p);
-
-    // Apply alignment
+    // Determine text alignment
     let align_str = match params.alignment {
         ParserAlignment::Left => Some("left"),
         ParserAlignment::Right => Some("right"),
@@ -1759,9 +1832,14 @@ fn create_table_cell_with_template(
             })
         }
     };
+
+    // Apply alignment to the paragraph inside the cell (w:pPr/w:jc)
+    // This is where Word actually reads text alignment from.
     if let Some(align) = align_str {
-        cell = cell.alignment(align);
+        p = p.align(align);
     }
+
+    let mut cell = TableCellElement::new().width(params.width).add_paragraph(p);
 
     // Apply vertical alignment from template
     if let Some(tmpl) = params.template {
@@ -1823,16 +1901,33 @@ fn code_block_to_paragraphs(
     filename: Option<&str>,
     highlight_lines: &[u32],
     show_line_numbers: bool,
+    code_font: Option<&str>,
+    code_size: Option<u32>,
 ) -> Vec<Paragraph> {
     let mut paragraphs = Vec::new();
 
     // Get syntax-highlighted tokens for the content
     let highlighted = crate::docx::highlight::highlight_code(content, lang);
 
+    // Helper to apply code font/size to a run
+    let apply_code_style = |mut run: Run| -> Run {
+        if let Some(font) = code_font {
+            run = run.font(font);
+        }
+        if let Some(size) = code_size {
+            run = run.size(size);
+        }
+        run
+    };
+
     // Add filename as a separate paragraph if present
     if let Some(fname) = filename {
+        let mut fname_run = Run::new(fname);
+        if let Some(font) = code_font {
+            fname_run = fname_run.font(font);
+        }
         let filename_para = Paragraph::with_style("CodeFilename")
-            .add_text(fname)
+            .add_run(fname_run)
             .spacing(280, 0)
             .line_spacing(240, "auto");
         paragraphs.push(filename_para);
@@ -1856,19 +1951,19 @@ fn code_block_to_paragraphs(
         // Handle line numbers
         if show_line_numbers {
             let num_text = format!("{:>2}. ", line_num);
-            p = p.add_run(Run::new(num_text).color("888888"));
+            p = p.add_run(apply_code_style(Run::new(num_text).color("888888")));
         }
 
         // Add syntax-highlighted runs
         if highlighted_line.is_empty() {
-            p = p.add_text("");
+            p = p.add_run(apply_code_style(Run::new("")));
         } else {
             for (text, color) in highlighted_line {
                 let mut run = Run::new(text.as_str());
                 if let Some(c) = color {
                     run = run.color(c);
                 }
-                p = p.add_run(run);
+                p = p.add_run(apply_code_style(run));
             }
         }
 
@@ -1960,7 +2055,34 @@ fn inlines_to_children(inlines: &[Inline], ctx: &mut BuildContext) -> Vec<Paragr
         children.extend(inline_to_children(inline, false, false, false, ctx));
     }
 
+    apply_font_override_to_children(&mut children, &ctx.font_override);
     children
+}
+
+/// Apply font override to all runs within paragraph children
+fn apply_font_override_to_children(
+    children: &mut [ParagraphChild],
+    font_override: &Option<String>,
+) {
+    if let Some(ref font) = font_override {
+        for child in children.iter_mut() {
+            match child {
+                ParagraphChild::Run(run) => {
+                    if run.font.is_none() {
+                        run.font = Some(font.clone());
+                    }
+                }
+                ParagraphChild::Hyperlink(hyperlink) => {
+                    for run in &mut hyperlink.children {
+                        if run.font.is_none() {
+                            run.font = Some(font.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Flatten nested inline formatting to paragraph children (runs or hyperlinks)
@@ -2117,6 +2239,10 @@ fn inline_to_children(
                         table_count: &mut 0, // Footnotes don't typically have tables with captions, or they share numbering?
                         figure_count: &mut 0,
                         lang: ctx.lang,
+                        font_override: ctx.font_override.clone(),
+                        code_font: ctx.code_font.clone(),
+                        code_size: ctx.code_size,
+                        quote_level: 0,
                     };
                     let paragraphs = block_to_paragraphs(
                         block,
@@ -2190,8 +2316,13 @@ fn inline_to_children(
         }
 
         Inline::SoftBreak => {
-            // Soft break becomes a space
-            vec![ParagraphChild::Run(Run::new(" "))]
+            // In blockquotes, soft break becomes a line break to preserve
+            // the visual line structure. Outside blockquotes, it becomes a space.
+            if ctx.quote_level > 0 {
+                vec![ParagraphChild::Run(create_break_run())]
+            } else {
+                vec![ParagraphChild::Run(Run::new(" "))]
+            }
         }
 
         Inline::HardBreak => {
@@ -2227,10 +2358,9 @@ fn inline_to_children(
 /// In OOXML, a line break is represented by a `<w:br/>` element
 /// inside a run. This creates a run that contains only a break.
 fn create_break_run() -> Run {
-    // For now, we'll use a text run with a newline
-    // In a full implementation, we'd modify the Run struct to support
-    // explicit break elements and update the XML generation accordingly
-    Run::new("\n").preserve_space(true)
+    let mut run = Run::new("");
+    run.break_type = Some("textWrapping".to_string());
+    run
 }
 
 /// Estimate the text length of inline elements
@@ -3585,18 +3715,18 @@ End of document.
         let docx = &result.document;
 
         if let Some(DocElement::Table(table)) = docx.elements.first() {
-            // Check alignments on data row cells
+            // Check alignments on data row cells' paragraphs (w:pPr/w:jc)
             if let Some(data_row) = table.rows.get(1) {
                 assert_eq!(
-                    data_row.cells.get(0).and_then(|c| c.alignment.as_deref()),
+                    data_row.cells.get(0).and_then(|c| c.paragraphs.first()).and_then(|p| p.align.as_deref()),
                     Some("left")
                 );
                 assert_eq!(
-                    data_row.cells.get(1).and_then(|c| c.alignment.as_deref()),
+                    data_row.cells.get(1).and_then(|c| c.paragraphs.first()).and_then(|p| p.align.as_deref()),
                     Some("center")
                 );
                 assert_eq!(
-                    data_row.cells.get(2).and_then(|c| c.alignment.as_deref()),
+                    data_row.cells.get(2).and_then(|c| c.paragraphs.first()).and_then(|p| p.align.as_deref()),
                     Some("right")
                 );
             }
@@ -3816,10 +3946,9 @@ End of document.
         assert_eq!(result.images.images.len(), 1);
         assert_eq!(result.images.images[0].rel_id, "rId6");
 
-        // Check paragraph has image
+        // Check paragraph has image + caption (fallback caption from alt text)
         let paragraphs = get_paragraphs(&result.document);
-        // Images are not paragraphs, so there should be 0 paragraphs
-        assert!(paragraphs.is_empty());
+        assert_eq!(paragraphs.len(), 1); // Caption paragraph
 
         if let Some(DocElement::Image(img)) = result.document.elements.first() {
             assert_eq!(img.rel_id, "rId6");

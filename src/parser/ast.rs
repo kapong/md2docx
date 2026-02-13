@@ -105,6 +105,13 @@ pub enum Block {
         end_line: Option<u32>,
         lang: Option<String>,
     },
+
+    /// Font group: a region of blocks rendered with a specific font override.
+    /// Created from `<!-- {font:FontName} -->` ... `<!-- {/font} -->` directives.
+    FontGroup {
+        font: String,
+        blocks: Vec<Block>,
+    },
 }
 
 /// List item (can contain nested blocks)

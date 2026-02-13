@@ -53,6 +53,16 @@ impl ContentTypes {
         ));
     }
 
+    /// Add embedded font content type (.odttf)
+    pub fn add_font_extension(&mut self) {
+        if !self.extensions.iter().any(|(e, _)| e == "odttf") {
+            self.extensions.push((
+                "odttf".to_string(),
+                "application/vnd.openxmlformats-officedocument.obfuscatedFont".to_string(),
+            ));
+        }
+    }
+
     /// Add header
     pub fn add_header(&mut self, id: u32) {
         self.overrides.push((

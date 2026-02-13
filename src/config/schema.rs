@@ -7,6 +7,24 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Deep-merge two TOML tables. Values in `override_table` take precedence.
+/// Sub-tables are merged recursively; leaf values from override replace base.
+#[cfg(feature = "cli")]
+fn deep_merge_toml(base: &mut toml::Table, override_table: &toml::Table) {
+    for (key, override_val) in override_table {
+        match (base.get_mut(key), override_val) {
+            // Both are tables → merge recursively
+            (Some(toml::Value::Table(base_sub)), toml::Value::Table(override_sub)) => {
+                deep_merge_toml(base_sub, override_sub);
+            }
+            // Override has a value → replace
+            _ => {
+                base.insert(key.clone(), override_val.clone());
+            }
+        }
+    }
+}
+
 /// Top-level project configuration from md2docx.toml
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -340,6 +358,43 @@ impl ProjectConfig {
     pub fn from_file(path: &Path) -> crate::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         Self::parse_toml(&content)
+    }
+
+    /// Load layered config: template md2docx.toml as base defaults,
+    /// root md2docx.toml as overrides on top.
+    ///
+    /// This enables a "default template config + project-specific overrides" pattern.
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
+    pub fn from_files_layered(
+        template_config_path: Option<&Path>,
+        root_config_path: Option<&Path>,
+    ) -> crate::Result<Self> {
+        match (template_config_path, root_config_path) {
+            (Some(tmpl), Some(root)) if tmpl.exists() && root.exists() => {
+                let tmpl_content = std::fs::read_to_string(tmpl)?;
+                let root_content = std::fs::read_to_string(root)?;
+
+                let mut base_table: toml::Table = toml::from_str(&tmpl_content)
+                    .map_err(|e| crate::Error::Config(format!(
+                        "Failed to parse template config {}: {}", tmpl.display(), e
+                    )))?;
+                let override_table: toml::Table = toml::from_str(&root_content)
+                    .map_err(|e| crate::Error::Config(format!(
+                        "Failed to parse root config {}: {}", root.display(), e
+                    )))?;
+
+                deep_merge_toml(&mut base_table, &override_table);
+
+                toml::Value::Table(base_table)
+                    .try_into()
+                    .map_err(|e| crate::Error::Config(format!(
+                        "Failed to deserialize merged config: {}", e
+                    )))
+            }
+            (_, Some(root)) if root.exists() => Self::from_file(root),
+            (Some(tmpl), _) if tmpl.exists() => Self::from_file(tmpl),
+            _ => Ok(Self::default()),
+        }
     }
 
     /// Parse config from a TOML string
@@ -701,5 +756,68 @@ title = "Missing closing bracket"
         assert_eq!(sanitize_filename("File/Path"), "File_Path");
         assert_eq!(sanitize_filename(""), "unknown");
         assert_eq!(sanitize_filename("   "), "unknown");
+    }
+
+    #[test]
+    #[cfg(feature = "cli")]
+    fn test_deep_merge_toml() {
+        let base_toml = r##"
+[document]
+title = "Base Title"
+language = "th"
+author = "Base Author"
+
+[fonts]
+default = "Noto Sans Thai"
+code = "IBM Plex Sans Thai"
+normal_based_size = 14
+h1_based_color = "#000080"
+
+[toc]
+enabled = true
+depth = 2
+title = "สารบัญ"
+
+[appendices]
+prefix = "ภาคผนวก"
+"##;
+
+        let override_toml = r##"
+[document]
+title = "Override Title"
+author = "Override Author"
+version = "1.0.0"
+
+[fonts]
+h1_based_color = "#663701"
+
+[toc]
+title = "Table of Contents"
+
+[appendices]
+prefix = "Appendix"
+"##;
+
+        let mut base_table: toml::Table = toml::from_str(base_toml).unwrap();
+        let override_table: toml::Table = toml::from_str(override_toml).unwrap();
+        deep_merge_toml(&mut base_table, &override_table);
+
+        let config: ProjectConfig = toml::Value::Table(base_table).try_into().unwrap();
+
+        // Overridden values
+        assert_eq!(config.document.title, "Override Title");
+        assert_eq!(config.document.author, "Override Author");
+        assert_eq!(config.document.version, "1.0.0");
+        assert_eq!(config.fonts.h1_based_color, "#663701");
+        assert_eq!(config.toc.title, "Table of Contents");
+        assert_eq!(config.appendices.prefix, "Appendix");
+
+        // Preserved base values (not in override)
+        assert_eq!(config.document.language, "th");
+        assert_eq!(config.fonts.default, "Noto Sans Thai");
+        assert_eq!(config.fonts.code, "IBM Plex Sans Thai");
+        assert_eq!(config.fonts.normal_based_size, 14);
+        assert_eq!(config.toc.enabled, true);
+        assert_eq!(config.toc.depth, 2);
     }
 }

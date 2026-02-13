@@ -1,0 +1,45 @@
+# Default template configuration for md2docx
+# This serves as the base config. Override specific values in the root md2docx.toml.
+
+[document]
+language = "th"
+page_width = "210mm"
+page_height = "297mm"
+page_margin_top = "25.4mm"
+page_margin_bottom = "25.4mm"
+page_margin_left = "31.5mm"
+page_margin_right = "25.4mm"
+custom_var = "ทดสอบ ทดสอบ"
+
+[output]
+file = "output/output.docx"
+
+[toc]
+enabled = true
+depth = 2
+title = "สารบัญ"
+
+[fonts]
+default = "Noto Sans Thai"
+code = "IBM Plex Sans Thai"
+normal_based_size = 14
+normal_based_color = "#000000"
+h1_based_color = "#000080"
+caption_based_color = "#000000"
+caption_based_size = 12
+code_based_size = 9
+embed = true
+embed_dir = "fonts"
+
+[code]
+theme = "light"
+show_filename = true
+show_line_numbers = false
+
+[chapters]
+pattern = "ch*_*.md"
+sort = "numeric"
+
+[appendices]
+pattern = "ap*_*.md"
+prefix = "ภาคผนวก"

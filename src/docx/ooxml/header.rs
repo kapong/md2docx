@@ -120,23 +120,34 @@ impl HeaderXml {
     fn write_header_paragraph<W: std::io::Write>(&self, writer: &mut Writer<W>) -> Result<()> {
         writer.write_event(Event::Start(BytesStart::new("w:p")))?;
 
-        // Paragraph properties with tab stops
+        // Paragraph properties with tab stops (only if there's actual content)
+        let has_content = !self.config.left.is_empty()
+            || !self.config.center.is_empty()
+            || !self.config.right.is_empty();
+
         writer.write_event(Event::Start(BytesStart::new("w:pPr")))?;
 
-        // Tab stops: center at 4513 twips, right at 9026 twips (for A4 size)
-        writer.write_event(Event::Start(BytesStart::new("w:tabs")))?;
+        if has_content {
+            // Tab stops: only add when there's content to position
+            let mut tabs = Vec::new();
+            if !self.config.center.is_empty() {
+                tabs.push(("center", "4513"));
+            }
+            if !self.config.right.is_empty() {
+                tabs.push(("right", "9026"));
+            }
+            if !tabs.is_empty() {
+                writer.write_event(Event::Start(BytesStart::new("w:tabs")))?;
+                for (val, pos) in &tabs {
+                    let mut tab = BytesStart::new("w:tab");
+                    tab.push_attribute(("w:val", *val));
+                    tab.push_attribute(("w:pos", *pos));
+                    writer.write_event(Event::Empty(tab))?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("w:tabs")))?;
+            }
+        }
 
-        let mut center_tab = BytesStart::new("w:tab");
-        center_tab.push_attribute(("w:val", "center"));
-        center_tab.push_attribute(("w:pos", "4513"));
-        writer.write_event(Event::Empty(center_tab))?;
-
-        let mut right_tab = BytesStart::new("w:tab");
-        right_tab.push_attribute(("w:val", "right"));
-        right_tab.push_attribute(("w:pos", "9026"));
-        writer.write_event(Event::Empty(right_tab))?;
-
-        writer.write_event(Event::End(BytesEnd::new("w:tabs")))?;
         writer.write_event(Event::End(BytesEnd::new("w:pPr")))?;
 
         // Left content
@@ -372,10 +383,10 @@ mod tests {
         let xml = header.to_xml().unwrap();
         let xml_str = String::from_utf8(xml).unwrap();
 
-        // Should still generate valid XML structure
+        // Should still generate valid XML structure but no tabs for empty config
         assert!(xml_str.contains("<w:hdr"));
         assert!(xml_str.contains("<w:p"));
-        assert!(xml_str.contains("<w:tabs"));
+        assert!(!xml_str.contains("<w:tabs"));
     }
 
     #[test]

@@ -23,6 +23,8 @@ pub struct CoverTemplate {
     pub margins: PageMargins,
     /// Raw XML content of the cover page (for direct copying)
     pub raw_xml: Option<String>,
+    /// Header/footer template extracted from cover.docx (if present)
+    pub header_footer: Option<super::header_footer::HeaderFooterTemplate>,
 }
 
 /// Page margins
@@ -131,6 +133,7 @@ impl Default for CoverTemplate {
             page_height: 16838, // A4 height in twips
             margins: PageMargins::default(),
             raw_xml: None,
+            header_footer: None,
         }
     }
 }
@@ -337,6 +340,9 @@ pub fn extract(path: &Path) -> Result<CoverTemplate> {
     // Extract background color if any
     let background_color = extract_background_color(&document_xml);
 
+    // Extract header/footer from cover.docx if present
+    let header_footer = super::header_footer::extract(path).ok().filter(|hf| !hf.is_empty());
+
     Ok(CoverTemplate {
         background_color,
         elements,
@@ -344,6 +350,7 @@ pub fn extract(path: &Path) -> Result<CoverTemplate> {
         page_height: height,
         margins,
         raw_xml: Some(cover_xml),
+        header_footer,
     })
 }
 

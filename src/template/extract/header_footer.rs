@@ -20,6 +20,10 @@ pub struct HeaderFooterTemplate {
     pub different_first_page: bool,
     /// Media files referenced by headers/footers (images, etc.)
     pub media: Vec<MediaFile>,
+    /// Tab stops from the template's Header style (position, alignment)
+    pub header_style_tabs: Vec<(u32, String)>,
+    /// Tab stops from the template's Footer style (position, alignment)
+    pub footer_style_tabs: Vec<(u32, String)>,
 }
 
 /// Content of a single header or footer
@@ -140,6 +144,9 @@ pub fn extract(path: &Path) -> Result<HeaderFooterTemplate> {
     collect_media_files(&mut archive, &default_footer, &mut media)?;
     collect_media_files(&mut archive, &first_page_footer, &mut media)?;
 
+    // 7. Extract Header/Footer style tab stops from styles.xml
+    let (header_style_tabs, footer_style_tabs) = extract_style_tabs(&mut archive)?;
+
     Ok(HeaderFooterTemplate {
         default_header,
         default_footer,
@@ -147,6 +154,8 @@ pub fn extract(path: &Path) -> Result<HeaderFooterTemplate> {
         first_page_footer,
         different_first_page,
         media,
+        header_style_tabs,
+        footer_style_tabs,
     })
 }
 
@@ -450,6 +459,65 @@ pub fn guess_content_type(filename: &str) -> String {
         "emf" => "image/x-emf".to_string(),
         _ => "application/octet-stream".to_string(),
     }
+}
+
+/// Extract tab stops from the Header and Footer styles in the template's styles.xml
+///
+/// Returns (header_tabs, footer_tabs) where each is a Vec of (position, alignment).
+fn extract_style_tabs<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<(Vec<(u32, String)>, Vec<(u32, String)>)> {
+    let styles_xml = match archive.by_name("word/styles.xml") {
+        Ok(mut file) => {
+            let mut content = String::new();
+            file.read_to_string(&mut content).map_err(Error::Io)?;
+            content
+        }
+        Err(_) => return Ok((Vec::new(), Vec::new())),
+    };
+
+    let header_tabs = extract_tabs_for_style(&styles_xml, "Header");
+    let footer_tabs = extract_tabs_for_style(&styles_xml, "Footer");
+
+    Ok((header_tabs, footer_tabs))
+}
+
+/// Extract tab stops from a specific style definition in styles.xml
+fn extract_tabs_for_style(styles_xml: &str, style_id: &str) -> Vec<(u32, String)> {
+    // Find the style element with w:styleId="Header" or w:styleId="Footer"
+    let pattern = format!(
+        r#"<w:style[^>]*w:styleId="{}"[^>]*>.*?</w:style>"#,
+        style_id
+    );
+    let style_regex = regex::Regex::new(&pattern).expect("style_regex should be valid");
+
+    let style_match = match style_regex.find(styles_xml) {
+        Some(m) => m.as_str(),
+        None => return Vec::new(),
+    };
+
+    // Find <w:tabs>...</w:tabs> within the style
+    let tabs_regex =
+        regex::Regex::new(r"<w:tabs>(.*?)</w:tabs>").expect("tabs_regex should be valid");
+    let tabs_content = match tabs_regex.captures(style_match) {
+        Some(cap) => cap.get(1).unwrap().as_str(),
+        None => return Vec::new(),
+    };
+
+    // Extract individual <w:tab> elements
+    let tab_regex = regex::Regex::new(
+        r#"<w:tab[^>]*w:val="([^"]*)"[^>]*w:pos="(\d+)"[^>]*/>"#,
+    )
+    .expect("tab_regex should be valid");
+
+    let mut tabs = Vec::new();
+    for cap in tab_regex.captures_iter(tabs_content) {
+        let alignment = cap.get(1).unwrap().as_str().to_string();
+        let position: u32 = cap.get(2).unwrap().as_str().parse().unwrap_or(0);
+        tabs.push((position, alignment));
+    }
+
+    tabs
 }
 
 #[cfg(test)]

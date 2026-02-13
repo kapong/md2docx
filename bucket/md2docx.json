@@ -6,7 +6,7 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/kapong/md2docx/releases/download/v0.1.9/md2docx-windows-x86_64.exe",
-            "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "hash": "463c4c3d4490a9997036cff591292774d0bffb8313c2af76da248a5b2b8562ae",
             "bin": [["md2docx-windows-x86_64.exe", "md2docx"]]
         }
     },

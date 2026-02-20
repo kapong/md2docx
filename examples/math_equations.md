@@ -1,6 +1,6 @@
 ---
 title: "Math Equations Demo / ตัวอย่างสมการคณิตศาสตร์"
-language: en
+language: th
 ---
 
 # Math Equations / สมการคณิตศาสตร์

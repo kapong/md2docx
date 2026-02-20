@@ -1361,6 +1361,7 @@ pub(crate) enum DocElement {
     Image(ImageElement),
     RawXml(String), // Raw XML content (e.g. from cover template)
     /// Display math block (raw OMML paragraph XML)
+    #[allow(dead_code)]
     MathBlock(String),
 }
 

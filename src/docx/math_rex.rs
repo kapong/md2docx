@@ -243,6 +243,7 @@ static RENDER_CACHE: Lazy<Mutex<HashMap<String, MathSvgResult>>> =
 /// Rich metadata from a rendered math SVG, providing everything needed
 /// for correct sizing and vertical alignment without ad-hoc heuristics.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MathSvgResult {
     /// The SVG image bytes
     pub svg_bytes: Vec<u8>,

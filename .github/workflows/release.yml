@@ -89,8 +89,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
+      
+      - name: Checkout submodules
+        run: |
+          git config --global core.protectNTFS false
+          git submodule update --init --force --depth=1
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

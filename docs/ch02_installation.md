@@ -148,6 +148,59 @@ cargo install md2docx
 md2docx --version
 ```
 
+## Optional Dependencies / ส่วนเสริมเพิ่มเติม
+
+### LaTeX Toolchain (for Math Equation Images)
+
+If you want to render math equations as high-quality images (the default `renderer = "image"` mode), install a LaTeX distribution:
+
+หากต้องการแสดงผลสมการคณิตศาสตร์เป็นภาพคุณภาพสูง (โหมด `renderer = "image"` ซึ่งเป็นค่าเริ่มต้น) ให้ติดตั้ง LaTeX:
+
+**macOS:**
+
+```bash
+brew install --cask basictex
+# or full: brew install --cask mactex
+```
+
+**Linux (Ubuntu/Debian):**
+
+```bash
+sudo apt install texlive-base texlive-extra-utils
+```
+
+**Windows:**
+Download and install [MiKTeX](https://miktex.org/) or [TeX Live](https://tug.org/texlive/).
+
+Verify the toolchain is available:
+
+ตรวจสอบว่าเครื่องมือพร้อมใช้งาน:
+
+```bash
+dvisvgm --version
+tectonic --version  # or: latex --version
+```
+
+> **Note:** If the LaTeX toolchain is not installed, md2docx will automatically fall back to native Word equation rendering (OMML). You can also explicitly set `renderer = "omml"` in your `md2docx.toml` to skip the LaTeX requirement.
+>
+> **หมายเหตุ:** หากไม่ได้ติดตั้ง LaTeX md2docx จะใช้การแสดงผลสมการแบบ Word ดั้งเดิม (OMML) แทนโดยอัตโนมัติ คุณสามารถตั้ง `renderer = "omml"` ใน `md2docx.toml` เพื่อข้ามความต้องการ LaTeX ได้
+
+### Embedded Tectonic (Optional Feature)
+
+You can build md2docx with the tectonic TeX engine compiled directly into the binary, eliminating the need to install `tectonic` CLI separately. Only `dvisvgm` is still needed externally.
+
+สามารถ build md2docx โดยรวม tectonic TeX engine เข้าไปในไบนารีโดยตรง ไม่ต้องติดตั้ง `tectonic` CLI แยกต่างหาก ต้องใช้เฉพาะ `dvisvgm` จากภายนอกเท่านั้น
+
+```bash
+cargo install md2docx --features tectonic-lib
+```
+
+> **Note:** The `tectonic-lib` feature requires system C/C++ libraries (`harfbuzz`, `icu`, `freetype`, `graphite2`) and increases binary size significantly. On first use, tectonic downloads a ~30 MB TeX package bundle from the internet.
+>
+> **หมายเหตุ:** ฟีเจอร์ `tectonic-lib` ต้องใช้ไลบรารี C/C++ ของระบบ (`harfbuzz`, `icu`, `freetype`, `graphite2`) และทำให้ไบนารีใหญ่ขึ้นอย่างมาก ในการใช้งานครั้งแรก tectonic จะดาวน์โหลดชุดแพ็คเกจ TeX ขนาด ~30 MB จากอินเทอร์เน็ต
+
+---
+
 ## Verifying Installation / ตรวจสอบการติดตั้ง
 
 After installation, verify that md2docx is working correctly:

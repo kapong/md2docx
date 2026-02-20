@@ -3,6 +3,7 @@ pub mod font_embed;
 pub(crate) mod highlight;
 pub mod image_utils;
 pub(crate) mod math;
+pub(crate) mod math_rex;
 pub(crate) mod ooxml;
 pub(crate) mod packager;
 pub(crate) mod rels_manager;

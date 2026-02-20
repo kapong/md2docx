@@ -37,6 +37,10 @@ pub enum Error {
     #[error("Mermaid error: {0}")]
     Mermaid(String),
 
+    /// Math rendering error
+    #[error("Math error: {0}")]
+    Math(String),
+
     /// Git diff error
     #[error("Git error: {0}")]
     Git(String),

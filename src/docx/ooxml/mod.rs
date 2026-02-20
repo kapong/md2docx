@@ -28,7 +28,7 @@ pub(crate) use styles::{
 };
 
 // Public API exports
-pub use document::{Paragraph, Run};
+pub use document::{Paragraph, Run, TabStop};
 pub use footer::FooterConfig;
 pub use footnotes::FootnotesXml;
 pub use header::{HeaderConfig, HeaderFooterField};

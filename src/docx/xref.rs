@@ -25,6 +25,7 @@ pub(crate) struct CrossRefContext {
     chapter_num: u32,
     figure_num: u32,
     table_num: u32,
+    equation_num: u32,
 }
 
 impl CrossRefContext {
@@ -43,6 +44,7 @@ impl CrossRefContext {
             self.chapter_num += 1;
             self.figure_num = 0; // Reset per-chapter counters
             self.table_num = 0;
+            self.equation_num = 0;
             (RefType::Chapter, Some(self.chapter_num.to_string()))
         } else {
             (RefType::Section, None)
@@ -114,6 +116,42 @@ impl CrossRefContext {
         bookmark_name
     }
 
+    /// Register an equation anchor
+    pub fn register_equation(&mut self, id: &str) -> String {
+        self.next_bookmark_id += 1;
+        self.equation_num += 1;
+
+        let bookmark_name = format!("_Ref_{}", sanitize_bookmark_name(id));
+        let number = if self.chapter_num > 0 {
+            format!("{}.{}", self.chapter_num, self.equation_num)
+        } else {
+            self.equation_num.to_string()
+        };
+
+        self.anchors.insert(
+            id.to_string(),
+            AnchorInfo {
+                id: id.to_string(),
+                bookmark_name: bookmark_name.clone(),
+                ref_type: RefType::Equation,
+                display_text: format!("Equation {}", number),
+                number: Some(number),
+            },
+        );
+
+        bookmark_name
+    }
+
+    /// Get current equation number (for display equations without an explicit id)
+    pub fn next_equation_number(&mut self) -> String {
+        self.equation_num += 1;
+        if self.chapter_num > 0 {
+            format!("{}.{}", self.chapter_num, self.equation_num)
+        } else {
+            self.equation_num.to_string()
+        }
+    }
+
     /// Register a generic anchor (for future extensibility)
     #[allow(dead_code)]
     pub fn register_anchor(&mut self, id: &str, ref_type: RefType, text: &str) -> String {
@@ -180,6 +218,13 @@ impl CrossRefContext {
                     }
                 }
                 RefType::Section => anchor.display_text.clone(),
+                RefType::Equation => {
+                    if let Some(num) = &anchor.number {
+                        num.clone()
+                    } else {
+                        anchor.display_text.clone()
+                    }
+                }
                 RefType::Appendix => {
                     if let Some(num) = &anchor.number {
                         match lang {

@@ -435,6 +435,14 @@ impl ProjectBuilder {
             base_path: first_content_dir,
             page: page_config,
             embedded_fonts,
+            mermaid_spacing: {
+                let before = self.config.mermaid.spacing_before.parse::<u32>().unwrap_or(120);
+                let after = self.config.mermaid.spacing_after.parse::<u32>().unwrap_or(120);
+                (before, after)
+            },
+            math_renderer: self.config.math.renderer.clone(),
+            math_font_size: self.config.math.font_size.clone(),
+            math_number_all: self.config.math.number_all,
             ..DocumentConfig::default()
         }
     }

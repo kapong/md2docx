@@ -49,13 +49,24 @@ spacing_after = "120"
 
 **Alternative considered**: Using an empty paragraph before/after — rejected because it creates selectable whitespace and complicates editing.
 
-### D2: LaTeX-to-image — use `latex2image` Rust crate or external tool
+### D2: LaTeX-to-image — use external TeX engine or embedded tectonic library
 
-Use an external LaTeX engine (via `latex` + `dvipng`, or `dvisvgm`) to render LaTeX to SVG/PNG images. The approach:
+Use a LaTeX engine to render LaTeX to SVG images. Supports three engine modes:
 
-1. Write the LaTeX expression to a temporary `.tex` file with a minimal preamble
-2. Run `latex` → `dvisvgm` (for SVG) to produce a vector image
-3. Read the image back and embed it as a `DocElement::Image` (same path as mermaid)
+1. **Embedded tectonic library** (feature `tectonic-lib`): Uses the tectonic Rust crate compiled into the binary. No separate TeX installation needed (still requires `dvisvgm`).
+2. **Tectonic CLI**: Uses externally installed `tectonic` command.
+3. **Traditional latex**: Uses `latex` from TeX Live / MacTeX / BasicTeX.
+
+The rendering pipeline:
+
+1. Write the LaTeX expression to a temporary `.tex` file with a minimal preamble (`\documentclass[<font_size>]{article}` with amsmath/amssymb/amsfonts packages)
+2. Run TeX engine → XDV/DVI output
+3. Run `dvisvgm --exact --no-fonts` → SVG vector image
+4. Read the image back and embed it as a `DocElement::Image` (same path as mermaid)
+
+**TeX toolchain PATH discovery (`augmented_path()`)**: Child processes for CLI tools use an augmented `PATH` that appends well-known TeX installation directories (e.g., `/Library/TeX/texbin`, TeX Live year-versioned paths for macOS/Linux). This ensures TeX tools are found even when not in the user's shell PATH.
+
+**LaTeX font size**: Defaults to `10pt` (compact, suitable for document embedding). Configurable via `[math] font_size` in md2docx.toml. Valid values: `"8pt"`, `"9pt"`, `"10pt"`, `"11pt"`, `"12pt"`. Invalid values fall back to `10pt`.
 
 **Rendering format**: SVG preferred (vector, crisp at any zoom). PNG as fallback if SVG pipeline unavailable.
 
@@ -73,7 +84,8 @@ Add `[math]` section to `md2docx.toml`:
 
 ```toml
 [math]
-renderer = "image"  # "image" | "omml" (default: "image")
+renderer = "image"    # "image" | "auto" | "omml" (default: "image")
+font_size = "10pt"    # "8pt" | "9pt" | "10pt" | "11pt" | "12pt" (default: "10pt")
 ```
 
 When `renderer = "image"`:
@@ -81,6 +93,11 @@ When `renderer = "image"`:
 - Display math (`$$...$$`) → render to SVG, embed as centered image
 - Inline math (`$...$`) → render to SVG, embed as inline image (anchored in text run)
 - If LaTeX toolchain unavailable → fall back to OMML with a warning
+
+When `renderer = "auto"`:
+
+- Detect toolchain at startup; use "image" if LaTeX+dvisvgm are available, "omml" otherwise
+- Provides zero-config experience: best quality when tools are present, graceful fallback when not
 
 When `renderer = "omml"`:
 

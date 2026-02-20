@@ -8,6 +8,15 @@ use crate::error::Result;
 use crate::i18n::detection::{contains_thai, detect_language};
 use crate::template::extract::table::{BorderStyle, BorderStyles, CellMargins};
 
+/// Tab stop definition for paragraph properties
+#[derive(Debug, Clone)]
+pub struct TabStop {
+    /// Tab stop type: "center", "right", "left", "decimal", "bar"
+    pub val: String,
+    /// Position in twips from the left margin
+    pub pos: u32,
+}
+
 /// Header and footer references for a section
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HeaderFooterRefs {
@@ -402,6 +411,12 @@ pub(crate) enum ParagraphChild {
     Hyperlink(Hyperlink),
     /// Office Math inline element (raw OMML XML)
     OfficeMath(String),
+    /// Inline image element (e.g., math equation rendered as image)
+    InlineImage(ImageElement),
+    /// Bookmark start marker — placed between runs for targeted bookmarks
+    BookmarkStart { id: u32, name: String },
+    /// Bookmark end marker — paired with BookmarkStart
+    BookmarkEnd { id: u32 },
 }
 
 /// Paragraph with style and children (runs or hyperlinks)
@@ -426,6 +441,7 @@ pub struct Paragraph {
     pub(crate) empty_header_footer_refs: Option<HeaderFooterRefs>, // Empty header/footer refs to use when suppressing
     pub(crate) bookmark_start: Option<BookmarkStart>,              // Bookmark start element
     pub(crate) bookmark_end: bool, // If true, close bookmark after content
+    pub tabs: Vec<TabStop>,        // Tab stops for this paragraph
     // Page layout for section breaks (in twips)
     pub sect_page_width: Option<u32>,    // Page width for sectPr
     pub sect_page_height: Option<u32>,   // Page height for sectPr
@@ -460,6 +476,7 @@ impl Paragraph {
             empty_header_footer_refs: None,
             bookmark_start: None,
             bookmark_end: false,
+            tabs: Vec::new(),
             sect_page_width: None,
             sect_page_height: None,
             sect_margin_top: None,
@@ -502,12 +519,20 @@ impl Paragraph {
         self
     }
 
+    /// Add an inline image element to the paragraph
+    pub(crate) fn add_inline_image(mut self, img: ImageElement) -> Self {
+        self.children.push(ParagraphChild::InlineImage(img));
+        self
+    }
+
     /// Get an iterator over all runs in the paragraph (including those inside hyperlinks)
     pub fn iter_runs(&self) -> impl Iterator<Item = &Run> {
         self.children.iter().filter_map(|child| match child {
             ParagraphChild::Run(run) => Some(run),
             ParagraphChild::Hyperlink(link) => link.children.first(),
             ParagraphChild::OfficeMath(_) => None,
+            ParagraphChild::InlineImage(_) => None,
+            ParagraphChild::BookmarkStart { .. } | ParagraphChild::BookmarkEnd { .. } => None,
         })
     }
 
@@ -716,7 +741,17 @@ impl Paragraph {
                 writer.write_event(Event::Empty(shd))?;
             }
 
-            // 7. Tabs (not used in current implementation, placeholder for ordering)
+            // 7. Tabs
+            if !self.tabs.is_empty() {
+                writer.write_event(Event::Start(BytesStart::new("w:tabs")))?;
+                for tab in &self.tabs {
+                    let mut tab_elem = BytesStart::new("w:tab");
+                    tab_elem.push_attribute(("w:val", tab.val.as_str()));
+                    tab_elem.push_attribute(("w:pos", tab.pos.to_string().as_str()));
+                    writer.write_event(Event::Empty(tab_elem))?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("w:tabs")))?;
+            }
 
             // 8. Spacing
             if self.spacing_before.is_some() || self.spacing_after.is_some() || self.line.is_some()
@@ -922,6 +957,31 @@ impl Paragraph {
                     // Write raw OMML XML (m:oMath element)
                     Self::write_raw_math_xml(writer, xml)?;
                 }
+                ParagraphChild::InlineImage(image) => {
+                    // Write inline image inside a run (for inline math images, etc.)
+                    writer.write_event(Event::Start(BytesStart::new("w:r")))?;
+                    // Add run properties for vertical positioning (inline math alignment)
+                    if let Some(pos) = image.position {
+                        writer.write_event(Event::Start(BytesStart::new("w:rPr")))?;
+                        let mut position = BytesStart::new("w:position");
+                        position.push_attribute(("w:val", pos.to_string().as_str()));
+                        writer.write_event(Event::Empty(position))?;
+                        writer.write_event(Event::End(BytesEnd::new("w:rPr")))?;
+                    }
+                    self.write_inline_drawing(writer, image)?;
+                    writer.write_event(Event::End(BytesEnd::new("w:r")))?;
+                }
+                ParagraphChild::BookmarkStart { id, name } => {
+                    let mut bk_start = BytesStart::new("w:bookmarkStart");
+                    bk_start.push_attribute(("w:id", id.to_string().as_str()));
+                    bk_start.push_attribute(("w:name", name.as_str()));
+                    writer.write_event(Event::Empty(bk_start))?;
+                }
+                ParagraphChild::BookmarkEnd { id } => {
+                    let mut bk_end = BytesStart::new("w:bookmarkEnd");
+                    bk_end.push_attribute(("w:id", id.to_string().as_str()));
+                    writer.write_event(Event::Empty(bk_end))?;
+                }
             }
         }
 
@@ -973,6 +1033,110 @@ impl Paragraph {
             }
             buf.clear();
         }
+        Ok(())
+    }
+
+    /// Write an inline drawing (image) inside the current paragraph/run
+    fn write_inline_drawing<W: std::io::Write>(
+        &self,
+        writer: &mut Writer<W>,
+        image: &ImageElement,
+    ) -> Result<()> {
+        // <w:drawing>
+        writer.write_event(Event::Start(BytesStart::new("w:drawing")))?;
+
+        // <wp:inline distT="0" distB="0" distL="0" distR="0">
+        let mut inline = BytesStart::new("wp:inline");
+        inline.push_attribute(("distT", "0"));
+        inline.push_attribute(("distB", "0"));
+        inline.push_attribute(("distL", "0"));
+        inline.push_attribute(("distR", "0"));
+        writer.write_event(Event::Start(inline))?;
+
+        // <wp:extent cx="WIDTH" cy="HEIGHT"/>
+        let mut extent = BytesStart::new("wp:extent");
+        extent.push_attribute(("cx", image.width_emu.to_string().as_str()));
+        extent.push_attribute(("cy", image.height_emu.to_string().as_str()));
+        writer.write_event(Event::Empty(extent))?;
+
+        // <wp:effectExtent l="0" t="0" r="0" b="0"/>
+        let mut effect = BytesStart::new("wp:effectExtent");
+        effect.push_attribute(("l", "0"));
+        effect.push_attribute(("t", "0"));
+        effect.push_attribute(("r", "0"));
+        effect.push_attribute(("b", "0"));
+        writer.write_event(Event::Empty(effect))?;
+
+        // <wp:docPr id="N" name="Math N"/>
+        let mut doc_pr = BytesStart::new("wp:docPr");
+        doc_pr.push_attribute(("id", image.id.to_string().as_str()));
+        doc_pr.push_attribute(("name", format!("Math {}", image.id).as_str()));
+        if !image.alt_text.is_empty() {
+            doc_pr.push_attribute(("descr", image.alt_text.as_str()));
+        }
+        writer.write_event(Event::Empty(doc_pr))?;
+
+        // <wp:cNvGraphicFramePr>
+        writer.write_event(Event::Start(BytesStart::new("wp:cNvGraphicFramePr")))?;
+        let mut locks = BytesStart::new("a:graphicFrameLocks");
+        locks.push_attribute(("xmlns:a", "http://schemas.openxmlformats.org/drawingml/2006/main"));
+        locks.push_attribute(("noChangeAspect", "1"));
+        writer.write_event(Event::Empty(locks))?;
+        writer.write_event(Event::End(BytesEnd::new("wp:cNvGraphicFramePr")))?;
+
+        // <a:graphic>
+        writer.write_event(Event::Start(BytesStart::new("a:graphic")))?;
+        let mut data = BytesStart::new("a:graphicData");
+        data.push_attribute(("uri", "http://schemas.openxmlformats.org/drawingml/2006/picture"));
+        writer.write_event(Event::Start(data))?;
+
+        // <pic:pic>
+        writer.write_event(Event::Start(BytesStart::new("pic:pic")))?;
+        writer.write_event(Event::Start(BytesStart::new("pic:nvPicPr")))?;
+        let mut c_nv_pr = BytesStart::new("pic:cNvPr");
+        c_nv_pr.push_attribute(("id", image.id.to_string().as_str()));
+        c_nv_pr.push_attribute(("name", format!("Math {}", image.id).as_str()));
+        writer.write_event(Event::Empty(c_nv_pr))?;
+        writer.write_event(Event::Empty(BytesStart::new("pic:cNvPicPr")))?;
+        writer.write_event(Event::End(BytesEnd::new("pic:nvPicPr")))?;
+
+        // <pic:blipFill>
+        writer.write_event(Event::Start(BytesStart::new("pic:blipFill")))?;
+        let mut blip = BytesStart::new("a:blip");
+        blip.push_attribute(("r:embed", image.rel_id.as_str()));
+        writer.write_event(Event::Empty(blip))?;
+        writer.write_event(Event::Start(BytesStart::new("a:stretch")))?;
+        writer.write_event(Event::Empty(BytesStart::new("a:fillRect")))?;
+        writer.write_event(Event::End(BytesEnd::new("a:stretch")))?;
+        writer.write_event(Event::End(BytesEnd::new("pic:blipFill")))?;
+
+        // <pic:spPr>
+        writer.write_event(Event::Start(BytesStart::new("pic:spPr")))?;
+        let mut xfrm = BytesStart::new("a:xfrm");
+        xfrm.push_attribute(("xmlns:a", "http://schemas.openxmlformats.org/drawingml/2006/main"));
+        writer.write_event(Event::Start(xfrm))?;
+        let mut off = BytesStart::new("a:off");
+        off.push_attribute(("x", "0"));
+        off.push_attribute(("y", "0"));
+        writer.write_event(Event::Empty(off))?;
+        let mut ext = BytesStart::new("a:ext");
+        ext.push_attribute(("cx", image.width_emu.to_string().as_str()));
+        ext.push_attribute(("cy", image.height_emu.to_string().as_str()));
+        writer.write_event(Event::Empty(ext))?;
+        writer.write_event(Event::End(BytesEnd::new("a:xfrm")))?;
+        let mut prst_geom = BytesStart::new("a:prstGeom");
+        prst_geom.push_attribute(("prst", "rect"));
+        writer.write_event(Event::Start(prst_geom))?;
+        writer.write_event(Event::Empty(BytesStart::new("a:avLst")))?;
+        writer.write_event(Event::End(BytesEnd::new("a:prstGeom")))?;
+        writer.write_event(Event::End(BytesEnd::new("pic:spPr")))?;
+
+        writer.write_event(Event::End(BytesEnd::new("pic:pic")))?;
+        writer.write_event(Event::End(BytesEnd::new("a:graphicData")))?;
+        writer.write_event(Event::End(BytesEnd::new("a:graphic")))?;
+        writer.write_event(Event::End(BytesEnd::new("wp:inline")))?;
+        writer.write_event(Event::End(BytesEnd::new("w:drawing")))?;
+
         Ok(())
     }
 }
@@ -1071,6 +1235,11 @@ pub struct ImageElement {
     pub shadow: Option<ImageShadowEffect>,
     pub effect_extent: Option<ImageEffectExtent>,
     pub alignment: Option<String>, // "left", "center", "right"
+    pub spacing_before: Option<u32>, // Paragraph spacing before in twips
+    pub spacing_after: Option<u32>,  // Paragraph spacing after in twips
+    /// Vertical position offset in half-points (negative = lower).
+    /// Used to vertically center inline math with surrounding text.
+    pub position: Option<i32>,
 }
 
 /// Image border effect for OOXML generation
@@ -1125,6 +1294,9 @@ impl ImageElement {
             shadow: None,
             effect_extent: None,
             alignment: None,
+            spacing_before: None,
+            spacing_after: None,
+            position: None,
         }
     }
 
@@ -1160,6 +1332,12 @@ impl ImageElement {
 
     pub fn with_alignment(mut self, alignment: &str) -> Self {
         self.alignment = Some(alignment.to_string());
+        self
+    }
+
+    pub fn with_spacing(mut self, before: u32, after: u32) -> Self {
+        self.spacing_before = Some(before);
+        self.spacing_after = Some(after);
         self
     }
 
@@ -1575,8 +1753,10 @@ impl DocumentXml {
 
                     // Spacing
                     let mut spacing = BytesStart::new("w:spacing");
-                    spacing.push_attribute(("w:before", "0"));
-                    spacing.push_attribute(("w:after", "0"));
+                    let before_str = image.spacing_before.unwrap_or(0).to_string();
+                    let after_str = image.spacing_after.unwrap_or(0).to_string();
+                    spacing.push_attribute(("w:before", before_str.as_str()));
+                    spacing.push_attribute(("w:after", after_str.as_str()));
                     spacing.push_attribute(("w:line", "240"));
                     spacing.push_attribute(("w:lineRule", "auto"));
                     writer.write_event(Event::Empty(spacing))?;

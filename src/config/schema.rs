@@ -38,6 +38,8 @@ pub struct ProjectConfig {
     pub chapters: ChaptersSection,
     pub appendices: AppendicesSection,
     pub cover: CoverSection,
+    pub mermaid: MermaidSection,
+    pub math: MathSection,
 }
 
 /// Document metadata section
@@ -350,6 +352,49 @@ pub struct CoverSection {
     pub title: Option<String>,
     pub subtitle: Option<String>,
     pub date: Option<String>,
+}
+
+/// Mermaid diagram configuration section
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MermaidSection {
+    /// Spacing before the mermaid diagram paragraph in twips (default: "120")
+    pub spacing_before: String,
+    /// Spacing after the mermaid diagram paragraph in twips (default: "120")
+    pub spacing_after: String,
+}
+
+impl Default for MermaidSection {
+    fn default() -> Self {
+        Self {
+            spacing_before: "120".to_string(),
+            spacing_after: "120".to_string(),
+        }
+    }
+}
+
+/// Math equation rendering configuration section
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MathSection {
+    /// Rendering mode: "rex" (pure Rust, default) or "omml" (Word native)
+    pub renderer: String,
+    /// Font size for math rendering: "8pt", "9pt", "10pt", "11pt", or "12pt" (default: "10pt")
+    pub font_size: String,
+    /// Whether to number all display equations, including those without \label.
+    /// When false (default), only labeled equations get `(N)` numbers.
+    /// When true, all display equations get sequential numbers.
+    pub number_all: bool,
+}
+
+impl Default for MathSection {
+    fn default() -> Self {
+        Self {
+            renderer: "rex".to_string(),
+            font_size: "10pt".to_string(),
+            number_all: false,
+        }
+    }
 }
 
 impl ProjectConfig {

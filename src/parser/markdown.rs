@@ -767,6 +767,8 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
 
             Event::DisplayMath(math) => {
                 let math = math.to_string();
+                // Extract \label{...} from the LaTeX content for cross-referencing
+                let (content, id) = extract_math_label(&math);
                 // Display math becomes a block-level math element
                 finish_current_block_with_footnote(
                     &mut current_block,
@@ -780,7 +782,7 @@ pub fn parse_markdown(input: &str) -> ParsedDocument {
                     &mut footnote_builder,
                     &mut list_stack,
                     &mut block_stack,
-                    Block::MathBlock { content: math },
+                    Block::MathBlock { content, id },
                 );
             }
 
@@ -1464,6 +1466,35 @@ fn extract_image_attributes(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract `\label{...}` from LaTeX math content.
+/// Returns (content_without_label, Option<label_id>).
+/// E.g. `"E = mc^2 \\label{eq:einstein}"` → `("E = mc^2", Some("einstein"))`
+/// The `eq:` prefix is stripped since the cross-reference system adds it via `{ref:eq:einstein}`.
+fn extract_math_label(latex: &str) -> (String, Option<String>) {
+    // Match \label{...} anywhere in the string
+    if let Some(start) = latex.find("\\label{") {
+        let after = &latex[start + 7..]; // skip past "\label{"
+        if let Some(end) = after.find('}') {
+            let label = after[..end].trim().to_string();
+            // Remove the \label{...} from the content
+            let before = &latex[..start];
+            let rest = &after[end + 1..];
+            let cleaned = format!("{}{}", before, rest).trim().to_string();
+            if !label.is_empty() {
+                // Strip common prefixes like "eq:" since the ref system
+                // uses {ref:eq:name} which splits into prefix "eq" + target "name"
+                let id = if let Some(stripped) = label.strip_prefix("eq:") {
+                    stripped.to_string()
+                } else {
+                    label
+                };
+                return (cleaned, Some(id));
+            }
+        }
+    }
+    (latex.to_string(), None)
 }
 
 /// Builder enum for constructing blocks during parsing

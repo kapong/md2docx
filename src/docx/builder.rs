@@ -8,14 +8,14 @@ use crate::docx::image_utils::{default_image_size_emu, read_image_dimensions};
 use crate::docx::ooxml::{
     DocElement, DocumentXml, FooterConfig, FooterXml, FootnotesXml, HeaderConfig, HeaderFooterRefs,
     HeaderXml, ImageElement, Paragraph, ParagraphChild, Run, Table, TableCellElement, TableRow,
-    TableWidth,
+    TableWidth, TabStop,
 };
 use crate::docx::rels_manager::RelIdManager;
 use crate::docx::toc::{TocBuilder, TocConfig};
 use crate::docx::xref::CrossRefContext;
 use crate::parser::{
     extract_inline_text, Alignment as ParserAlignment, Block, Inline, ListItem, ParsedDocument,
-    TableCell as ParserTableCell,
+    RefType, TableCell as ParserTableCell,
 };
 use crate::template::extract::table::TableTemplate;
 use crate::Language;
@@ -400,7 +400,7 @@ pub fn parse_length_to_twips(length: &str) -> Option<u32> {
 }
 
 /// Document build configuration
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DocumentConfig {
     pub title: String,
     pub toc: TocConfig,
@@ -430,6 +430,40 @@ pub struct DocumentConfig {
     /// When set, fonts are automatically scanned and embedded from this directory.
     /// If `embedded_fonts` is also populated, this field is ignored.
     pub embed_dir: Option<std::path::PathBuf>,
+    /// Mermaid diagram spacing: (before, after) in twips
+    pub mermaid_spacing: (u32, u32),
+    /// Math renderer mode: "rex" (default) or "omml"
+    pub math_renderer: String,
+    /// Font size for math rendering (e.g. "10pt", "12pt")
+    pub math_font_size: String,
+    /// Whether to number all display equations (including unlabeled ones)
+    pub math_number_all: bool,
+}
+
+impl Default for DocumentConfig {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            toc: TocConfig::default(),
+            header: HeaderConfig::default(),
+            footer: FooterConfig::default(),
+            different_first_page: false,
+            template_dir: None,
+            id_offset: 0,
+            process_all_headings: false,
+            header_footer_template: None,
+            document_meta: None,
+            fonts: None,
+            base_path: None,
+            page: None,
+            embedded_fonts: Vec::new(),
+            embed_dir: None,
+            mermaid_spacing: (120, 120),
+            math_renderer: "rex".to_string(),
+            math_font_size: "10pt".to_string(),
+            math_number_all: false,
+        }
+    }
 }
 
 /// Mapping of original relationship ID to media file content
@@ -523,6 +557,12 @@ pub(crate) fn build_document(
     let mut table_count: u32 = 0;
     let mut figure_count: u32 = 0;
 
+    // Calculate body width for tab stops (page width minus margins)
+    let page_width = config.page.as_ref().and_then(|p| p.width).unwrap_or(11906);
+    let margin_left = config.page.as_ref().and_then(|p| p.margin_left).unwrap_or(1440);
+    let margin_right = config.page.as_ref().and_then(|p| p.margin_right).unwrap_or(1440);
+    let body_width_twips = page_width.saturating_sub(margin_left + margin_right);
+
     // Cross-reference context for tracking anchors
     let mut xref_ctx = CrossRefContext::new();
 
@@ -543,6 +583,8 @@ pub(crate) fn build_document(
             .iter()
             .position(|b| matches!(b, Block::ThematicBreak))
     };
+
+    let resolved_math_renderer = config.math_renderer.clone();
 
     // Process all blocks in the document
     // Track the last list seen to support resuming lists across code blocks
@@ -569,6 +611,11 @@ pub(crate) fn build_document(
             code_font: config.fonts.as_ref().and_then(|f| f.code.clone()),
             code_size: config.fonts.as_ref().and_then(|f| f.code_size),
             quote_level: 0,
+            mermaid_spacing: config.mermaid_spacing,
+            math_renderer: resolved_math_renderer.clone(),
+            math_font_size: config.math_font_size.clone(),
+            math_number_all: config.math_number_all,
+            body_width_twips,
         });
 
         // Insert blank paragraph before heading if previous block was not a heading
@@ -919,6 +966,11 @@ pub(crate) struct BuildContextParams<'a> {
     pub code_font: Option<String>,
     pub code_size: Option<u32>,
     pub quote_level: usize,
+    pub mermaid_spacing: (u32, u32),
+    pub math_renderer: String,
+    pub math_font_size: String,
+    pub math_number_all: bool,
+    pub body_width_twips: u32,
 }
 
 /// Context for building a document, holding all tracked state
@@ -942,6 +994,11 @@ pub(crate) struct BuildContext<'a> {
     pub code_font: Option<String>,
     pub code_size: Option<u32>,
     pub quote_level: usize,
+    pub mermaid_spacing: (u32, u32),
+    pub math_renderer: String,
+    pub math_font_size: String,
+    pub math_number_all: bool,
+    pub body_width_twips: u32,
 }
 
 impl<'a> BuildContext<'a> {
@@ -965,6 +1022,11 @@ impl<'a> BuildContext<'a> {
             code_font: params.code_font,
             code_size: params.code_size,
             quote_level: params.quote_level,
+            mermaid_spacing: params.mermaid_spacing,
+            math_renderer: params.math_renderer,
+            math_font_size: params.math_font_size,
+            math_number_all: params.math_number_all,
+            body_width_twips: params.body_width_twips,
         }
     }
 }
@@ -1188,6 +1250,9 @@ fn block_to_elements(
                         }
                     }
 
+                    // Apply mermaid diagram spacing
+                    let (sp_before, sp_after) = ctx.mermaid_spacing;
+                    img = img.with_spacing(sp_before, sp_after);
 
                     // Build result elements
                     let mut elements = vec![DocElement::Image(img)];
@@ -1416,9 +1481,86 @@ fn block_to_elements(
         // All other blocks just produce paragraphs
         _ => {
             // Special handling for MathBlock at element level
-            if let Block::MathBlock { content } = block {
-                let omml = crate::docx::math::latex_to_omml_paragraph(content);
-                return vec![DocElement::MathBlock(omml)];
+            if let Block::MathBlock { content, id } = block {
+                let center_pos = ctx.body_width_twips / 2;
+                let right_pos = ctx.body_width_twips;
+
+                // Get equation number via xref (chapter-relative) — only for labeled equations
+                let (eq_number, bookmark_name) = if let Some(eq_id) = id {
+                    if let Some(anchor) = ctx.xref_ctx.resolve(eq_id) {
+                        (Some(anchor.number.clone().unwrap_or_default()), Some(anchor.bookmark_name.clone()))
+                    } else {
+                        // Not pre-registered — register now
+                        let bk = ctx.xref_ctx.register_equation(eq_id);
+                        let num = ctx.xref_ctx.resolve(eq_id).and_then(|a| a.number.clone()).unwrap_or_default();
+                        (Some(num), Some(bk))
+                    }
+                } else if ctx.math_number_all {
+                    // No label but number_all is enabled — assign a number without bookmark
+                    let num = ctx.xref_ctx.next_equation_number();
+                    (Some(num), None)
+                } else {
+                    // No label — no number
+                    (None, None)
+                };
+
+                // Check renderer config: "rex" or "omml"
+                if ctx.math_renderer == "rex" {
+                    let render_result = crate::docx::math_rex::render_latex_to_svg(content, true, &ctx.math_font_size);
+                    match render_result {
+                        Ok(math) => {
+                            let image_id = ctx.rel_manager.next_image_id();
+                            let filename = format!("math_display{}.svg", image_id);
+
+                            let rel_id = ctx.image_ctx.add_image_data(
+                                &filename,
+                                math.svg_bytes,
+                                None,
+                                ctx.rel_manager,
+                            );
+
+                            let mut img = ImageElement::new(&rel_id, math.width_emu, math.height_emu)
+                                .alt_text("Math equation")
+                                .name(&filename)
+                                .id(image_id);
+                            img.position = math.position;
+
+                            let bookmark = bookmark_name.as_ref().map(|bk_name| {
+                                *ctx.bookmark_id_counter += 1;
+                                (*ctx.bookmark_id_counter, bk_name.clone())
+                            });
+                            let mut para = build_equation_paragraph(center_pos, right_pos, eq_number.as_deref(), bookmark);
+                            // Insert inline image before the tab-to-right run (index 1)
+                            para.children.insert(1, ParagraphChild::InlineImage(img));
+
+                            return vec![DocElement::Paragraph(Box::new(para))];
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: ReX rendering failed, falling back to OMML: {}", e);
+                            let omml = crate::docx::math::latex_to_omml_paragraph(content);
+
+                            let bookmark = bookmark_name.as_ref().map(|bk_name| {
+                                *ctx.bookmark_id_counter += 1;
+                                (*ctx.bookmark_id_counter, bk_name.clone())
+                            });
+                            let mut para = build_equation_paragraph(center_pos, right_pos, eq_number.as_deref(), bookmark);
+                            para.children.insert(1, ParagraphChild::OfficeMath(omml));
+
+                            return vec![DocElement::Paragraph(Box::new(para))];
+                        }
+                    }
+                } else {
+                    let omml = crate::docx::math::latex_to_omml_paragraph(content);
+
+                    let bookmark = bookmark_name.as_ref().map(|bk_name| {
+                        *ctx.bookmark_id_counter += 1;
+                        (*ctx.bookmark_id_counter, bk_name.clone())
+                    });
+                    let mut para = build_equation_paragraph(center_pos, right_pos, eq_number.as_deref(), bookmark);
+                    para.children.insert(1, ParagraphChild::OfficeMath(omml));
+
+                    return vec![DocElement::Paragraph(Box::new(para))];
+                }
             }
             block_to_paragraphs(block, list_level, ctx, skip_toc)
                 .into_iter()
@@ -1581,15 +1723,113 @@ fn block_to_paragraphs(
             vec![]
         }
 
-        Block::MathBlock { content } => {
-            // Display math: rendered as a centered paragraph with OMML
+        Block::MathBlock { content, id } => {
+            // Display math: centered equation with right-aligned running number
+            let center_pos = ctx.body_width_twips / 2;
+            let right_pos = ctx.body_width_twips;
+
+            let (eq_number, bookmark_name) = if let Some(eq_id) = id {
+                if let Some(anchor) = ctx.xref_ctx.resolve(eq_id) {
+                    (Some(anchor.number.clone().unwrap_or_default()), Some(anchor.bookmark_name.clone()))
+                } else {
+                    let bk = ctx.xref_ctx.register_equation(eq_id);
+                    let num = ctx.xref_ctx.resolve(eq_id).and_then(|a| a.number.clone()).unwrap_or_default();
+                    (Some(num), Some(bk))
+                }
+            } else if ctx.math_number_all {
+                // No label but number_all is enabled — assign a number without bookmark
+                let num = ctx.xref_ctx.next_equation_number();
+                (Some(num), None)
+            } else {
+                (None, None)
+            };
+
             let omml = crate::docx::math::latex_to_omml_paragraph(content);
-            let mut para = Paragraph::new();
-            para.align = Some("center".to_string());
-            para.children.push(ParagraphChild::OfficeMath(omml));
+            let bookmark = bookmark_name.as_ref().map(|bk_name| {
+                *ctx.bookmark_id_counter += 1;
+                (*ctx.bookmark_id_counter, bk_name.clone())
+            });
+            let mut para = build_equation_paragraph(center_pos, right_pos, eq_number.as_deref(), bookmark);
+            para.children.insert(1, ParagraphChild::OfficeMath(omml));
+
             vec![para]
         }
     }
+}
+
+/// Build a display equation paragraph with tab stops and equation number.
+/// Returns a paragraph with: [tab-to-center] [tab-to-right] [(number)]
+/// The caller should insert the equation content (image or OMML) at index 1.
+///
+/// If `bookmark` is provided as `(id, name)`, a bookmark is placed around
+/// just the number portion `(N)` so that REF fields can reference it.
+fn build_equation_paragraph(
+    center_pos: u32,
+    right_pos: u32,
+    eq_number: Option<&str>,
+    bookmark: Option<(u32, String)>,
+) -> Paragraph {
+    let mut para = Paragraph::new();
+
+    if eq_number.is_some() {
+        // Labeled equation: center tab + right tab for number
+        para.tabs = vec![
+            TabStop { val: "center".to_string(), pos: center_pos },
+            TabStop { val: "right".to_string(), pos: right_pos },
+        ];
+    } else {
+        // Unlabeled equation: just center tab, no number
+        para.tabs = vec![
+            TabStop { val: "center".to_string(), pos: center_pos },
+        ];
+    }
+
+    // Tab to center position
+    para.children.push(ParagraphChild::Run(Run::new("").with_tab()));
+    // (equation content will be inserted at index 1 by caller)
+
+    // Only add the number portion if there's a label
+    if let Some(num) = eq_number {
+        // Tab to right position
+        para.children.push(ParagraphChild::Run(Run::new("").with_tab()));
+
+        // Bookmark start — wraps only the number portion for targeted REF fields
+        if let Some((bk_id, ref bk_name)) = bookmark {
+            para.children.push(ParagraphChild::BookmarkStart {
+                id: bk_id,
+                name: bk_name.clone(),
+            });
+        }
+
+        // Equation number using SEQ field: ( + SEQ Equation + )
+        para.children.push(ParagraphChild::Run(Run::new("(")));
+        // SEQ field: begin
+        para.children.push(ParagraphChild::Run(
+            Run::new("").with_field_char("begin"),
+        ));
+        // SEQ field: instruction
+        para.children.push(ParagraphChild::Run(
+            Run::new(" SEQ Equation \\* ARABIC ").with_instr_text(),
+        ));
+        // SEQ field: separate
+        para.children.push(ParagraphChild::Run(
+            Run::new("").with_field_char("separate"),
+        ));
+        // SEQ field: placeholder value (Word updates this on F9)
+        para.children.push(ParagraphChild::Run(Run::new(num)));
+        // SEQ field: end
+        para.children.push(ParagraphChild::Run(
+            Run::new("").with_field_char("end"),
+        ));
+        para.children.push(ParagraphChild::Run(Run::new(")")));
+
+        // Bookmark end
+        if let Some((bk_id, _)) = bookmark {
+            para.children.push(ParagraphChild::BookmarkEnd { id: bk_id });
+        }
+    }
+
+    para
 }
 
 /// Convert a heading block to a paragraph
@@ -1610,6 +1850,8 @@ fn heading_to_paragraph(level: u8, content: &[Inline], ctx: &mut BuildContext) -
             ParagraphChild::Run(r) => p.add_run(r),
             ParagraphChild::Hyperlink(h) => p.add_hyperlink(h),
             ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
+            ParagraphChild::InlineImage(img) => p.add_inline_image(img),
+            other => { p.children.push(other); p }
         };
     }
     p
@@ -1626,6 +1868,8 @@ fn paragraph_to_paragraph(inlines: &[Inline], ctx: &mut BuildContext) -> Paragra
             ParagraphChild::Run(r) => p.add_run(r),
             ParagraphChild::Hyperlink(h) => p.add_hyperlink(h),
             ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
+            ParagraphChild::InlineImage(img) => p.add_inline_image(img),
+            other => { p.children.push(other); p }
         };
     }
     p
@@ -1800,6 +2044,8 @@ fn create_table_cell_with_template(
                 }
                 ParagraphChild::Hyperlink(link) => p.add_hyperlink(link),
                 ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
+                ParagraphChild::InlineImage(img) => p.add_inline_image(img),
+                other => { p.children.push(other); p }
             };
         }
     } else {
@@ -1814,6 +2060,8 @@ fn create_table_cell_with_template(
                 }
                 ParagraphChild::Hyperlink(link) => p.add_hyperlink(link),
                 ParagraphChild::OfficeMath(xml) => p.add_office_math(xml),
+                ParagraphChild::InlineImage(img) => p.add_inline_image(img),
+                other => { p.children.push(other); p }
             };
         }
     }
@@ -2243,6 +2491,11 @@ fn inline_to_children(
                         code_font: ctx.code_font.clone(),
                         code_size: ctx.code_size,
                         quote_level: 0,
+                        mermaid_spacing: ctx.mermaid_spacing,
+                        math_renderer: ctx.math_renderer.clone(),
+                        math_font_size: ctx.math_font_size.clone(),
+                        math_number_all: ctx.math_number_all,
+                        body_width_twips: ctx.body_width_twips,
                     };
                     let paragraphs = block_to_paragraphs(
                         block,
@@ -2302,17 +2555,52 @@ fn inline_to_children(
             }
         }
 
-        Inline::CrossRef { target, .. } => {
-            // Get localized display text from cross-reference context
-            let display_text = ctx.xref_ctx.get_localized_display_text(target, ctx.lang);
+        Inline::CrossRef { target, ref_type } => {
+            // Resolve the anchor to get bookmark info
+            if let Some(anchor) = ctx.xref_ctx.resolve(target) {
+                let bookmark_name = anchor.bookmark_name.clone();
+                let display_text = ctx.xref_ctx.get_localized_display_text(target, ctx.lang);
 
-            // Create a run with the display text, styled as a link
-            // For now, just use blue color and underline
-            // TODO: In the future, create an internal hyperlink to the bookmark
-            let mut run = Run::new(&display_text);
-            run.color = Some("0563C1".to_string()); // Word hyperlink blue
-            run.underline = true;
-            vec![ParagraphChild::Run(run)]
+                if *ref_type == RefType::Equation {
+                    // Equation cross-refs use a dynamic REF field pointing to the bookmark
+                    // so Word can update numbers automatically with F9
+                    let mut children = Vec::new();
+                    // REF field begin
+                    children.push(ParagraphChild::Run(
+                        Run::new("").with_field_char("begin"),
+                    ));
+                    // REF field instruction
+                    children.push(ParagraphChild::Run(
+                        Run::new(format!(" REF {} \\h ", bookmark_name)).with_instr_text(),
+                    ));
+                    // REF field separate
+                    children.push(ParagraphChild::Run(
+                        Run::new("").with_field_char("separate"),
+                    ));
+                    // Placeholder text (Word updates this on F9)
+                    let mut placeholder = Run::new(&display_text);
+                    placeholder.color = Some("0563C1".to_string());
+                    placeholder.underline = true;
+                    children.push(ParagraphChild::Run(placeholder));
+                    // REF field end
+                    children.push(ParagraphChild::Run(
+                        Run::new("").with_field_char("end"),
+                    ));
+                    children
+                } else {
+                    // Non-equation cross-refs: styled text (TODO: hyperlink in future)
+                    let mut run = Run::new(&display_text);
+                    run.color = Some("0563C1".to_string());
+                    run.underline = true;
+                    vec![ParagraphChild::Run(run)]
+                }
+            } else {
+                // Unresolved reference — show as plain text
+                let display_text = ctx.xref_ctx.get_localized_display_text(target, ctx.lang);
+                let mut run = Run::new(&display_text);
+                run.color = Some("FF0000".to_string()); // Red to indicate missing ref
+                vec![ParagraphChild::Run(run)]
+            }
         }
 
         Inline::SoftBreak => {
@@ -2341,14 +2629,74 @@ fn inline_to_children(
         }
 
         Inline::InlineMath(latex) => {
-            let omml = crate::docx::math::latex_to_omml_inline(latex);
-            vec![ParagraphChild::OfficeMath(omml)]
+            if ctx.math_renderer == "rex" {
+                let render_result = crate::docx::math_rex::render_latex_to_svg(latex, false, &ctx.math_font_size);
+                match render_result {
+                    Ok(math) => {
+                        let image_id = ctx.rel_manager.next_image_id();
+                        let filename = format!("math_inline{}.svg", image_id);
+
+                        let rel_id = ctx.image_ctx.add_image_data(
+                            &filename,
+                            math.svg_bytes,
+                            None,
+                            ctx.rel_manager,
+                        );
+
+                        let mut img = ImageElement::new(&rel_id, math.width_emu, math.height_emu)
+                            .alt_text("Math")
+                            .name(&filename)
+                            .id(image_id);
+                        img.position = math.position;
+
+                        vec![ParagraphChild::InlineImage(img)]
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: ReX rendering failed for inline math, falling back to OMML: {}", e);
+                        let omml = crate::docx::math::latex_to_omml_inline(latex);
+                        vec![ParagraphChild::OfficeMath(omml)]
+                    }
+                }
+            } else {
+                let omml = crate::docx::math::latex_to_omml_inline(latex);
+                vec![ParagraphChild::OfficeMath(omml)]
+            }
         }
 
         Inline::DisplayMath(latex) => {
-            // Display math in inline context: use oMathPara
-            let omml = crate::docx::math::latex_to_omml_paragraph(latex);
-            vec![ParagraphChild::OfficeMath(omml)]
+            if ctx.math_renderer == "rex" {
+                let render_result = crate::docx::math_rex::render_latex_to_svg(latex, true, &ctx.math_font_size);
+                match render_result {
+                    Ok(math) => {
+                        let image_id = ctx.rel_manager.next_image_id();
+                        let filename = format!("math_display_inline{}.svg", image_id);
+
+                        let rel_id = ctx.image_ctx.add_image_data(
+                            &filename,
+                            math.svg_bytes,
+                            None,
+                            ctx.rel_manager,
+                        );
+
+                        let mut img = ImageElement::new(&rel_id, math.width_emu, math.height_emu)
+                            .alt_text("Math equation")
+                            .name(&filename)
+                            .id(image_id);
+                        img.position = math.position;
+
+                        vec![ParagraphChild::InlineImage(img)]
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: ReX rendering failed for display math, falling back to OMML: {}", e);
+                        let omml = crate::docx::math::latex_to_omml_paragraph(latex);
+                        vec![ParagraphChild::OfficeMath(omml)]
+                    }
+                }
+            } else {
+                // Display math in inline context: use oMathPara
+                let omml = crate::docx::math::latex_to_omml_paragraph(latex);
+                vec![ParagraphChild::OfficeMath(omml)]
+            }
         }
     }
 }
@@ -4649,5 +4997,101 @@ End of document.
             found_ref,
             "Cross-reference 'ตารางที่ 1.1' not found in document"
         );
+    }
+
+    #[test]
+    fn test_mermaid_spacing_default_config() {
+        // Default mermaid spacing should be (120, 120)
+        let config = DocumentConfig::default();
+        assert_eq!(config.mermaid_spacing, (120, 120));
+    }
+
+    #[test]
+    fn test_mermaid_spacing_custom_config() {
+        let mut config = DocumentConfig::default();
+        config.mermaid_spacing = (200, 300);
+        assert_eq!(config.mermaid_spacing, (200, 300));
+    }
+
+    #[test]
+    fn test_math_renderer_default_config() {
+        let config = DocumentConfig::default();
+        assert_eq!(config.math_renderer, "rex");
+    }
+
+    #[test]
+    fn test_math_renderer_omml_config() {
+        let mut config = DocumentConfig::default();
+        config.math_renderer = "omml".to_string();
+        assert_eq!(config.math_renderer, "omml");
+    }
+
+    #[test]
+    fn test_display_math_omml_renderer() {
+        // When renderer is "omml", display math without \label should produce
+        // a centered Paragraph with OfficeMath content but NO equation number
+        let md = "$$\nE = mc^2\n$$\n";
+        let parsed = parse_markdown_with_frontmatter(md);
+
+        let mut config = no_toc_config();
+        config.math_renderer = "omml".to_string();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
+
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Should have a Paragraph element containing OfficeMath (no SEQ field since no label)
+        let paragraphs = get_paragraphs(&result.document);
+        let has_math = paragraphs.iter().any(|p| {
+            p.children.iter().any(|c| matches!(c, ParagraphChild::OfficeMath(_)))
+        });
+        assert!(has_math, "Should produce Paragraph with OfficeMath content");
+
+        // Verify no SEQ field (unlabeled equations should not be numbered)
+        let has_seq = paragraphs.iter().any(|p| {
+            p.children.iter().any(|c| {
+                if let ParagraphChild::Run(r) = c {
+                    r.instr_text && r.text.contains("SEQ Equation")
+                } else {
+                    false
+                }
+            })
+        });
+        assert!(!has_seq, "Unlabeled display equations should not have SEQ field numbers");
+    }
+
+    #[test]
+    fn test_inline_math_omml_renderer() {
+        // When renderer is "omml", inline math should produce OfficeMath children
+        let md = "The formula $x^2$ is simple.\n";
+        let parsed = parse_markdown_with_frontmatter(md);
+
+        let mut config = no_toc_config();
+        config.math_renderer = "omml".to_string();
+        let mut rel_manager = crate::docx::rels_manager::RelIdManager::new();
+
+        let result = build_document(
+            &parsed,
+            Language::English,
+            &config,
+            &mut rel_manager,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Should have paragraphs with OfficeMath children
+        let paragraphs = get_paragraphs(&result.document);
+        let has_math = paragraphs.iter().any(|p| {
+            p.children.iter().any(|c| matches!(c, ParagraphChild::OfficeMath(_)))
+        });
+        assert!(has_math, "Should produce OfficeMath children when renderer is omml");
     }
 }

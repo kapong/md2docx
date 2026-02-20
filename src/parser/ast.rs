@@ -90,7 +90,7 @@ pub enum Block {
     Html(String),
 
     /// Math block (display equation): $$...$$
-    MathBlock { content: String },
+    MathBlock { content: String, id: Option<String> },
 
     /// Include directive: {!include:path.md}
     Include {
@@ -230,6 +230,7 @@ pub enum RefType {
     Section,
     Figure,
     Table,
+    Equation,
     Appendix,
     Footnote,
     Unknown,
@@ -242,6 +243,7 @@ impl RefType {
             "sec" | "section" => RefType::Section,
             "fig" | "figure" => RefType::Figure,
             "tbl" | "table" => RefType::Table,
+            "eq" | "equation" => RefType::Equation,
             "ap" | "appendix" => RefType::Appendix,
             "fn" | "footnote" => RefType::Footnote,
             _ => RefType::Unknown,

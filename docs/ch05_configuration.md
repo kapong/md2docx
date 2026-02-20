@@ -116,7 +116,7 @@ When using `dir`, md2docx looks for these files:
 
 เมื่อใช้ `dir` md2docx จะค้นหาไฟล์เหล่านี้:
 
-```
+```text
 template-dir/
 ├── styles.docx        # Style definitions / คำนิยาม Styles
 ├── cover.docx         # Cover page template / แม่แบบหน้าปก
@@ -500,6 +500,105 @@ skip_cover = true
 left = "© 2024 My Company"
 center = "{page}"
 right = "{date}"
+```
+
+---
+
+## [mermaid] Section {#ch05-mermaid}
+
+Mermaid diagram rendering configuration.
+
+การตั้งค่าการแสดงผลไดอะแกรม Mermaid
+
+### Options / ตัวเลือก
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `spacing_before` | string | `"120"` | Space before mermaid diagrams in twips / ระยะห่างก่อนไดอะแกรม Mermaid (หน่วย twips) |
+| `spacing_after` | string | `"120"` | Space after mermaid diagrams in twips / ระยะห่างหลังไดอะแกรม Mermaid (หน่วย twips) |
+
+### Spacing Values / ค่าระยะห่าง
+
+Spacing is specified in twips (1/20 of a point). Common values:
+
+ระยะห่างระบุเป็น twips (1/20 ของจุด) ค่าที่ใช้บ่อย:
+
+| Twips | Points | Description |
+|-------|--------|-------------|
+| `"0"` | 0pt | No spacing |
+| `"120"` | 6pt | Default spacing |
+| `"240"` | 12pt | One line spacing |
+| `"480"` | 24pt | Two line spacing |
+
+### Examples / ตัวอย่าง
+
+```toml
+# Default spacing (6pt before and after)
+[mermaid]
+spacing_before = "120"
+spacing_after = "120"
+```
+
+```toml
+# Larger spacing for visual separation
+[mermaid]
+spacing_before = "240"
+spacing_after = "240"
+```
+
+---
+
+## [math] Section {#ch05-math}
+
+Math equation rendering configuration.
+
+การตั้งค่าการแสดงผลสมการคณิตศาสตร์
+
+### Options / ตัวเลือก
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `renderer` | string | `"image"` | Math rendering mode: `"image"`, `"auto"`, or `"omml"` / โหมดการแสดงผลสมการ: `"image"`, `"auto"` หรือ `"omml"` |
+| `font_size` | string | `"10pt"` | LaTeX font size for image rendering: `"8pt"`, `"9pt"`, `"10pt"`, `"11pt"`, or `"12pt"` / ขนาดฟอนต์ LaTeX สำหรับการแสดงผลเป็นภาพ |
+
+### Renderer Modes / โหมดการแสดงผล
+
+- **`"image"`** (default): Renders LaTeX equations to SVG images using an external LaTeX toolchain (`tectonic` or `latex` + `dvisvgm`). Produces high-quality typeset output. Falls back to OMML if the toolchain is not available.
+  - **`"image"`** (ค่าเริ่มต้น): แสดงผลสมการ LaTeX เป็นภาพ SVG โดยใช้เครื่องมือ LaTeX ภายนอก (`tectonic` หรือ `latex` + `dvisvgm`) ให้ผลลัพธ์คุณภาพสูง จะใช้ OMML แทนหากไม่พบเครื่องมือ
+
+- **`"auto"`**: Automatically detects LaTeX toolchain. Uses `"image"` if available, otherwise falls back to `"omml"` silently.
+  - **`"auto"`**: ตรวจจับเครื่องมือ LaTeX อัตโนมัติ ใช้ `"image"` หากมี มิฉะนั้นจะใช้ `"omml"` โดยไม่แสดงคำเตือน
+
+- **`"omml"`**: Converts LaTeX to Office Math Markup Language (OMML) for native Word equation rendering. No external tools required.
+  - **`"omml"`**: แปลง LaTeX เป็น Office Math Markup Language (OMML) สำหรับการแสดงผลสมการแบบ Word ดั้งเดิม ไม่ต้องใช้เครื่องมือภายนอก
+
+### LaTeX Toolchain Requirements / ข้อกำหนดเครื่องมือ LaTeX
+
+When using `renderer = "image"`, ensure the following tools are installed and available in your PATH:
+
+เมื่อใช้ `renderer = "image"` ให้แน่ใจว่าเครื่องมือต่อไปนี้ถูกติดตั้งและอยู่ใน PATH:
+
+- A TeX engine — one of:
+  - **Embedded tectonic** (build with `--features tectonic-lib`): no separate install needed
+  - `tectonic` CLI — self-contained, auto-downloads packages
+  - `latex` — from TeX Live, MacTeX, or BasicTeX
+- `dvisvgm` — DVI/XDV to SVG converter (included with TeX distributions)
+
+> **Note**: md2docx automatically searches common TeX installation directories (e.g., `/Library/TeX/texbin` on macOS) even if they are not in your shell PATH.
+
+### Examples / ตัวอย่าง
+
+```toml
+# Use LaTeX-to-image rendering (default)
+[math]
+renderer = "image"
+font_size = "10pt"
+```
+
+```toml
+# Use native Word equations (no external tools needed)
+[math]
+renderer = "omml"
 ```
 
 ---

@@ -37,6 +37,10 @@ enum Commands {
         /// Include table of contents
         #[arg(long)]
         toc: bool,
+
+        /// Math renderer: "rex" (default, pure Rust) or "omml" (Word native)
+        #[arg(long, default_value = "rex")]
+        math_renderer: String,
     },
 }
 
@@ -51,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             output,
             template: _,
             toc,
+            math_renderer,
         } => {
             use md2docx::project::ProjectBuilder;
             use md2docx::{
@@ -84,6 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if toc {
                     doc_config.toc.enabled = true;
                 }
+                doc_config.math_renderer = math_renderer.clone();
 
                 let docx_bytes = markdown_to_docx_with_templates(
                     &content,

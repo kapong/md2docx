@@ -1744,6 +1744,51 @@ fn block_to_paragraphs(
                 (None, None)
             };
 
+            // Check renderer config: "rex" or "omml"
+            if ctx.math_renderer == "rex" {
+                let render_result = crate::docx::math_rex::render_latex_to_svg(content, true, &ctx.math_font_size);
+                match render_result {
+                    Ok(math) => {
+                        let image_id = ctx.rel_manager.next_image_id();
+                        let filename = format!("math_display{}.svg", image_id);
+
+                        let rel_id = ctx.image_ctx.add_image_data(
+                            &filename,
+                            math.svg_bytes,
+                            None,
+                            ctx.rel_manager,
+                        );
+
+                        let mut img = ImageElement::new(&rel_id, math.width_emu, math.height_emu)
+                            .alt_text("Math equation")
+                            .name(&filename)
+                            .id(image_id);
+                        img.position = math.position;
+
+                        let bookmark = bookmark_name.as_ref().map(|bk_name| {
+                            *ctx.bookmark_id_counter += 1;
+                            (*ctx.bookmark_id_counter, bk_name.clone())
+                        });
+                        let mut para = build_equation_paragraph(center_pos, right_pos, eq_number.as_deref(), bookmark);
+                        para.children.insert(1, ParagraphChild::InlineImage(img));
+
+                        return vec![para];
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: ReX rendering failed, falling back to OMML: {}", e);
+                        let omml = crate::docx::math::latex_to_omml_paragraph(content);
+                        let bookmark = bookmark_name.as_ref().map(|bk_name| {
+                            *ctx.bookmark_id_counter += 1;
+                            (*ctx.bookmark_id_counter, bk_name.clone())
+                        });
+                        let mut para = build_equation_paragraph(center_pos, right_pos, eq_number.as_deref(), bookmark);
+                        para.children.insert(1, ParagraphChild::OfficeMath(omml));
+
+                        return vec![para];
+                    }
+                }
+            }
+
             let omml = crate::docx::math::latex_to_omml_paragraph(content);
             let bookmark = bookmark_name.as_ref().map(|bk_name| {
                 *ctx.bookmark_id_counter += 1;

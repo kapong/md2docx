@@ -1,12 +1,12 @@
 {
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Markdown to professional DOCX converter with native Thai support",
     "homepage": "https://github.com/kapong/md2docx",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/kapong/md2docx/releases/download/v0.2.1/md2docx-windows-x86_64.exe",
-            "hash": "183a2925d56e783dea7f7f5b8d13def222967bc24b426a1d1b69914744fdbf4b",
+            "url": "https://github.com/kapong/md2docx/releases/download/v0.2.2/md2docx-windows-x86_64.exe",
+            "hash": "183a2925d56e783dea7f7f5b8d13def222967bc24b426a1d1b69914744fdbf4b"
             "bin": [["md2docx-windows-x86_64.exe", "md2docx"]]
         }
     },

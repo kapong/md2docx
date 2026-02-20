@@ -69,6 +69,37 @@ md2docx build -d docs/ -o output.docx
 
 ---
 
+## ⚙️ Configuration
+
+Create a `md2docx.toml` file alongside your Markdown files to customize output.
+
+### Math Equations
+
+```toml
+[math]
+renderer = "rex"       # "rex" (pure Rust, default) or "omml" (Word native)
+font_size = "10pt"     # "8pt" to "12pt" (default: "10pt")
+number_all = false     # true = number all display equations; false = only labeled ones
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `renderer` | `"rex"` | `"rex"` renders LaTeX to SVG using a built-in math engine. `"omml"` converts to Word's native math XML. |
+| `font_size` | `"10pt"` | Math font size. Supported: `8pt`, `9pt`, `10pt`, `11pt`, `12pt`. |
+| `number_all` | `false` | When `true`, every display equation gets a sequential number `(1)`, `(2)`, … even without `\label`. When `false`, only equations with `\label{eq:...}` are numbered. |
+
+**Equation labeling & cross-references:**
+
+```markdown
+$$
+E = mc^2 \label{eq:einstein}
+$$
+
+As shown in Equation {ref:eq:einstein}, energy equals...
+```
+
+---
+
 ## 🤖 AI Should Read
 
 If you are an AI agent working on this codebase:

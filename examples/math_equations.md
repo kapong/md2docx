@@ -230,3 +230,109 @@ $$(x+y)^n = \sum_{k=0}^{n} \binom{n}{k} x^{n-k} y^k$$
 ### Font Variants / รูปแบบตัวอักษร
 
 $$\mathbb{R}^n, \quad \mathbf{v} = (v_1, v_2, v_3), \quad \mathcal{L}\{f(t)\} = F(s)$$
+
+### Cases Environment / ฟังก์ชันแบบ cases
+
+$$f(x) = \begin{cases} x^2 & x \geq 0 \\ -x & x < 0 \end{cases}$$
+
+$$|x| = \begin{cases} x & x \geq 0 \\ -x & x < 0 \end{cases}$$
+
+$$\text{sgn}(x) = \begin{cases} 1 & x > 0 \\ 0 & x = 0 \\ -1 & x < 0 \end{cases}$$
+
+### Bold Symbols / สัญลักษณ์ตัวหนา
+
+$$\boldsymbol{\mu} = \frac{1}{N} \sum_{i=1}^{N} \mathbf{x}_i$$
+
+$$\Delta(C_i, C_j) = \frac{|C_i| \cdot |C_j|}{|C_i| + |C_j|} \|\boldsymbol{\mu}_i - \boldsymbol{\mu}_j\|^2$$
+
+$$\boldsymbol{\alpha} + \boldsymbol{\beta} = \boldsymbol{\gamma}$$
+
+### Text with Special Characters / ข้อความที่มีอักขระพิเศษ
+
+$$D_{\text{total}} = \sum_{k} w_k \cdot \text{DTW}(\mathbf{Z}_A, \mathbf{Z}_B)$$
+
+$$\text{CosSim}(\mathbf{a}, \mathbf{b}) = \frac{\mathbf{a} \cdot \mathbf{b}}{\|\mathbf{a}\| \; \|\mathbf{b}\|}$$
+
+## Research Equations / สมการจากงานวิจัย
+
+The following equations are drawn from a real academic paper on sign language processing (AutoAlignSign) to demonstrate md2docx handling of complex, real-world LaTeX.
+
+### Autoencoder Loss Function / ฟังก์ชันสูญเสีย
+
+$$\mathcal{L}_{\text{recon}} = \frac{1}{N} \sum_{i=1}^{N} \|\mathbf{x}_i - g_\phi(f_\theta(\mathbf{x}_i))\|^2 \label{eq:ae-loss}$$
+
+The reconstruction loss (Eq. {ref:eq:ae-loss}) trains the autoencoder $f_\theta$ (encoder) and $g_\phi$ (decoder) to learn a compact latent representation $\mathbf{z} = f_\theta(\mathbf{x})$ where $\hat{\mathbf{x}} = g_\phi(\mathbf{z})$.
+
+### Partitioned Latent Vectors / เวกเตอร์แฝงแบบแบ่งส่วน
+
+For each body part $k \in \{\text{body}, \text{face}, \text{left\_hand}, \text{right\_hand}\}$:
+
+$$\mathbf{z}^{(k)}_t = f_\theta^{(k)}(\mathbf{x}^{(k)}_t) \quad \text{where} \quad \mathbf{z}^{(k)}_t \in \mathbb{R}^{d_k}$$
+
+$$\mathbf{z} = [\mathbf{z}_{\text{sem}} \;\|\; \mathbf{z}_{\text{res}}] \in \mathbb{R}^{d_s + d_r}$$
+
+### Xavier Initialization / การกำหนดค่าเริ่มต้น
+
+$$W \sim \mathcal{N}\!\left(0,\; \sqrt{\frac{2}{n_{\text{in}} + n_{\text{out}}}}\right) \label{eq:xavier}$$
+
+The Xavier initialization (Eq. {ref:eq:xavier}) sets initial weights from a normal distribution where $n_{\text{in}}$ and $n_{\text{out}}$ are input and output neuron counts.
+
+### Signal Processing / การประมวลผลสัญญาณ
+
+Moving Average filter:
+
+$$\bar{s}[t] = \frac{1}{M} \sum_{k=0}^{M-1} s[t - k]$$
+
+Butterworth filter transfer function of order $n$ with cutoff frequency $\omega_c$:
+
+$$|H(j\omega)|^2 = \frac{1}{1 + \left(\frac{\omega}{\omega_c}\right)^{2n}} \label{eq:butterworth}$$
+
+### Cosine Similarity / ค่าความคล้ายโคไซน์
+
+$$\text{CosSim}(\mathbf{a}, \mathbf{b}) = \frac{\mathbf{a} \cdot \mathbf{b}}{\|\mathbf{a}\| \; \|\mathbf{b}\|} = \frac{\sum_{i=1}^{d} a_i b_i}{\sqrt{\sum_{i=1}^{d} a_i^2} \; \sqrt{\sum_{i=1}^{d} b_i^2}} \label{eq:cossim}$$
+
+The cosine distance is defined as $d_{\cos}(\mathbf{a}, \mathbf{b}) = 1 - \text{CosSim}(\mathbf{a}, \mathbf{b})$ so that $d_{\cos} = 0$ when vectors point in the same direction.
+
+### Tukey Window (Cases Environment) / หน้าต่างทูกี
+
+$$w[n] = \begin{cases}
+\frac{1}{2}\left[1 + \cos\!\left(\frac{2\pi}{\alpha}\left(\frac{n}{N-1} - \frac{\alpha}{2}\right)\right)\right] & 0 \le \frac{n}{N-1} < \frac{\alpha}{2} \\
+1 & \frac{\alpha}{2} \le \frac{n}{N-1} \le 1 - \frac{\alpha}{2} \\
+\frac{1}{2}\left[1 + \cos\!\left(\frac{2\pi}{\alpha}\left(\frac{n}{N-1} - 1 + \frac{\alpha}{2}\right)\right)\right] & 1 - \frac{\alpha}{2} < \frac{n}{N-1} \le 1
+\end{cases}$$
+
+### Dynamic Time Warping / การบิดเวลาแบบพลวัต
+
+DTW recurrence relation using the cases environment:
+
+$$D(i, j) = d(\mathbf{x}_i, \mathbf{y}_j) + \min \begin{cases} D(i-1, j) \\ D(i, j-1) \\ D(i-1, j-1) \end{cases} \label{eq:dtw}$$
+
+Sakoe-Chiba band constraint with window ratio $r$:
+
+$$\left|\frac{i}{N} - \frac{j}{M}\right| \le r$$
+
+Part-Weighted DTW distance over body parts $\mathcal{P} = \{\text{body}, \text{face}, \text{left\_hand}, \text{right\_hand}\}$:
+
+$$D_{\text{total}} = \sum_{k \in \mathcal{P}} w_k \cdot \text{DTW}(\mathbf{Z}^{(k)}_A,\; \mathbf{Z}^{(k)}_B) \label{eq:pwdtw}$$
+
+### Hierarchical Clustering / การจัดกลุ่มแบบลำดับชั้น
+
+Ward linkage variance increase when merging clusters $C_i$ and $C_j$:
+
+$$\Delta(C_i, C_j) = \frac{|C_i| \cdot |C_j|}{|C_i| + |C_j|} \|\boldsymbol{\mu}_i - \boldsymbol{\mu}_j\|^2 \label{eq:ward}$$
+
+### Motion Analysis Signals / สัญญาณวิเคราะห์การเคลื่อนไหว
+
+Activity signal (velocity magnitude in latent space):
+
+$$A(t) = \|\mathbf{z}_t - \mathbf{z}_{t-1}\|_2$$
+
+Coherence signal (local cosine similarity) with $\mathcal{N}(t) = \{\tau : |\tau - t| \le W\}$ and $\hat{\mathbf{z}}_t = \mathbf{z}_t / \|\mathbf{z}_t\|$:
+
+$$C(t) = \frac{1}{|\mathcal{N}(t)|} \sum_{\tau \in \mathcal{N}(t)} \text{CosSim}(\hat{\mathbf{z}}_t,\; \hat{\mathbf{z}}_\tau) \label{eq:coherence}$$
+
+### Pose Estimation Vectors / เวกเตอร์ท่าทาง
+
+Keypoint vector with 133 body landmarks: $\mathbf{p}_t = [(x_1, y_1), (x_2, y_2), \ldots, (x_{133}, y_{133})]$
+
+Dimensionality reduction from image space $\mathbb{R}^{H \times W \times 3}$ to pose space $\mathbf{p}_t \in \mathbb{R}^{133 \times 2}$.

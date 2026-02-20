@@ -234,6 +234,90 @@ fn find_closing_bracket(chars: &[char], start: usize) -> Option<usize> {
     None
 }
 
+/// Check if a LaTeX string contains non-Latin/non-math characters inside `\text{...}`
+/// blocks that cannot be rendered by the XITS Math font.
+///
+/// Returns `Some(char)` with the first unsupported character found, or `None`.
+fn find_unsupported_text_char(latex: &str) -> Option<char> {
+    // Find all \text{...} blocks and check their content
+    let bytes = latex.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Look for \text{ pattern
+        if i + 6 < len && &latex[i..i + 5] == r"\text" {
+            // Skip to the opening brace
+            let mut j = i + 5;
+            while j < len && bytes[j] == b' ' {
+                j += 1;
+            }
+            if j < len && bytes[j] == b'{' {
+                // Find matching close brace (handling nesting)
+                let mut depth = 1;
+                let start = j + 1;
+                j += 1;
+                while j < len && depth > 0 {
+                    if bytes[j] == b'{' {
+                        depth += 1;
+                    } else if bytes[j] == b'}' {
+                        depth -= 1;
+                    }
+                    if depth > 0 {
+                        j += 1;
+                    }
+                }
+                // Check chars in \text{...} content
+                let text_content = &latex[start..j];
+                for ch in text_content.chars() {
+                    // Allow ASCII, common punctuation, and basic Latin extensions
+                    if !ch.is_ascii() && !is_math_font_supported(ch) {
+                        return Some(ch);
+                    }
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Check if a non-ASCII character is likely supported by the XITS Math font.
+/// This covers Latin Extended, Greek, Cyrillic, and mathematical symbol ranges.
+fn is_math_font_supported(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(cp,
+        0x00A0..=0x024F  // Latin Extended-A/B
+        | 0x0370..=0x03FF // Greek and Coptic
+        | 0x0400..=0x04FF // Cyrillic
+        | 0x1D00..=0x1DBF // Phonetic Extensions
+        | 0x2000..=0x206F // General Punctuation
+        | 0x2070..=0x209F // Superscripts and Subscripts
+        | 0x20A0..=0x20CF // Currency Symbols 
+        | 0x20D0..=0x20FF // Combining Diacritical Marks for Symbols
+        | 0x2100..=0x214F // Letterlike Symbols
+        | 0x2150..=0x218F // Number Forms
+        | 0x2190..=0x21FF // Arrows
+        | 0x2200..=0x22FF // Mathematical Operators
+        | 0x2300..=0x23FF // Miscellaneous Technical
+        | 0x2460..=0x24FF // Enclosed Alphanumerics
+        | 0x2500..=0x257F // Box Drawing
+        | 0x25A0..=0x25FF // Geometric Shapes
+        | 0x2600..=0x26FF // Miscellaneous Symbols
+        | 0x2700..=0x27BF // Dingbats
+        | 0x27C0..=0x27EF // Miscellaneous Mathematical Symbols-A
+        | 0x27F0..=0x27FF // Supplemental Arrows-A
+        | 0x2900..=0x297F // Supplemental Arrows-B
+        | 0x2980..=0x29FF // Miscellaneous Mathematical Symbols-B
+        | 0x2A00..=0x2AFF // Supplemental Mathematical Operators
+        | 0x2B00..=0x2BFF // Miscellaneous Symbols and Arrows
+        | 0x1D400..=0x1D7FF // Mathematical Alphanumeric Symbols
+        | 0xFB00..=0xFB06 // Alphabetic Presentation Forms (ligatures)
+    )
+}
+
 // ── Public API ─────────────────────────────────────────────────────────
 
 /// Cache for rendered math expressions
@@ -307,6 +391,14 @@ pub fn render_latex_to_svg(
     // Preprocess LaTeX for ReX compatibility (e.g. \sqrt[n]{...})
     let latex = preprocess_latex(latex);
     let latex = latex.as_str();
+
+    // Check for non-Latin characters in \text{} blocks that the math font cannot render
+    if let Some(ch) = find_unsupported_text_char(latex) {
+        return Err(Error::Math(format!(
+            "\\text{{}} contains non-Latin character '{}' (U+{:04X}) unsupported by math font",
+            ch, ch as u32
+        )));
+    }
 
     // Parse and layout
     let layout_engine = LayoutBuilder::new(&math_font)

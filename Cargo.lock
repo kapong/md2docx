@@ -795,16 +795,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dagre_rust"
-version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be0e44f22d2a32979a1265aa1a70f6e2f4f43ec0d562d483a1c818f9a4121926"
-dependencies = [
- "graphlib_rust",
- "ordered_hashmap",
-]
-
-[[package]]
 name = "dashmap"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1090,6 +1080,20 @@ dependencies = [
 
 [[package]]
 name = "fontdb"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0299020c3ef3f60f526a4f64ab4a3d4ce116b1acbf24cdd22da0068e5d81dc3"
+dependencies = [
+ "fontconfig-parser",
+ "log",
+ "memmap2",
+ "slotmap",
+ "tinyvec",
+ "ttf-parser 0.20.0",
+]
+
+[[package]]
+name = "fontdb"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3a6f9af55fb97ad673fb7a69533eb2f967648a06fa21f8c9bb2cd6d33975716"
@@ -1099,7 +1103,7 @@ dependencies = [
  "memmap2",
  "slotmap",
  "tinyvec",
- "ttf-parser",
+ "ttf-parser 0.24.1",
 ]
 
 [[package]]
@@ -1954,15 +1958,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "graphlib_rust"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b47de2c5685b5bb3689d6b0977f38959f3d7d82d3556627cfebbfaa42eda05ea"
-dependencies = [
- "ordered_hashmap",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2681,7 +2676,7 @@ dependencies = [
 
 [[package]]
 name = "md2docx"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chromiumoxide",
  "chrono",
@@ -2708,7 +2703,7 @@ dependencies = [
  "tiny-skia",
  "tokio",
  "toml",
- "ttf-parser",
+ "ttf-parser 0.24.1",
  "unicode-script",
  "unicode-segmentation",
  "usvg",
@@ -2735,18 +2730,18 @@ dependencies = [
 
 [[package]]
 name = "mermaid-rs-renderer"
-version = "0.1.2"
-source = "git+https://github.com/1jehuang/mermaid-rs-renderer#30e632bf4c659d16fe72741d46f4bd089aa759fa"
+version = "0.2.0"
+source = "git+https://github.com/1jehuang/mermaid-rs-renderer?tag=v0.2.0#b0ffff0390d74e980461c13c327fbb7c37c2ba75"
 dependencies = [
  "anyhow",
- "dagre_rust",
- "graphlib_rust",
+ "fontdb 0.16.2",
  "json5",
  "once_cell",
  "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "ttf-parser 0.20.0",
 ]
 
 [[package]]
@@ -2915,12 +2910,6 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
-
-[[package]]
-name = "ordered_hashmap"
-version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb1ea499d242299d564879c8b375c11285f5a26d62d8010768909d6d099c4c5a"
 
 [[package]]
 name = "parking"
@@ -3479,7 +3468,7 @@ dependencies = [
  "log",
  "serde",
  "serde_derive",
- "ttf-parser",
+ "ttf-parser 0.24.1",
  "unicode-math",
 ]
 
@@ -3541,7 +3530,7 @@ dependencies = [
  "core_maths",
  "log",
  "smallvec",
- "ttf-parser",
+ "ttf-parser 0.24.1",
  "unicode-bidi-mirroring",
  "unicode-ccc",
  "unicode-properties",
@@ -4140,6 +4129,12 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "ttf-parser"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17f77d76d837a7830fe1d4f12b7b4ba4192c1888001c7164257e4bc6d21d96b4"
+
+[[package]]
+name = "ttf-parser"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5be21190ff5d38e8b4a2d3b6a3ae57f612cc39c96e83cedeaf7abc338a8bac4a"
@@ -4281,7 +4276,7 @@ dependencies = [
  "base64",
  "data-url",
  "flate2",
- "fontdb",
+ "fontdb 0.22.0",
  "imagesize",
  "kurbo",
  "log",

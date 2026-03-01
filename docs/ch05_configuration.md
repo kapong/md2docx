@@ -516,6 +516,8 @@ Mermaid diagram rendering configuration.
 |--------|------|---------|-------------|
 | `spacing_before` | string | `"120"` | Space before mermaid diagrams in twips / ระยะห่างก่อนไดอะแกรม Mermaid (หน่วย twips) |
 | `spacing_after` | string | `"120"` | Space after mermaid diagrams in twips / ระยะห่างหลังไดอะแกรม Mermaid (หน่วย twips) |
+| `output_format` | string | `"png"` | Output format: `"png"` (default, universal compatibility) or `"svg"` / รูปแบบเอาต์พุต: `"png"` (ค่าเริ่มต้น) หรือ `"svg"` |
+| `dpi` | integer | `150` | DPI for PNG rendering. Higher = sharper but larger file / ความละเอียด PNG ยิ่งสูงยิ่งคมแต่ไฟล์ใหญ่ขึ้น |
 
 ### Spacing Values / ค่าระยะห่าง
 
@@ -544,6 +546,19 @@ spacing_after = "120"
 [mermaid]
 spacing_before = "240"
 spacing_after = "240"
+```
+
+```toml
+# PNG output at 300 DPI for high-quality print
+[mermaid]
+output_format = "png"
+dpi = 300
+```
+
+```toml
+# SVG output (legacy mode)
+[mermaid]
+output_format = "svg"
 ```
 
 ---

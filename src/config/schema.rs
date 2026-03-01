@@ -362,6 +362,10 @@ pub struct MermaidSection {
     pub spacing_before: String,
     /// Spacing after the mermaid diagram paragraph in twips (default: "120")
     pub spacing_after: String,
+    /// Output format for mermaid diagrams: "png" (default) or "svg"
+    pub output_format: String,
+    /// DPI for PNG rendering (default: 150). Higher values produce sharper images.
+    pub dpi: u32,
 }
 
 impl Default for MermaidSection {
@@ -369,6 +373,8 @@ impl Default for MermaidSection {
         Self {
             spacing_before: "120".to_string(),
             spacing_after: "120".to_string(),
+            output_format: "png".to_string(),
+            dpi: 150,
         }
     }
 }
@@ -377,7 +383,7 @@ impl Default for MermaidSection {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct MathSection {
-    /// Rendering mode: "rex" (pure Rust, default) or "omml" (Word native)
+    /// Rendering mode: "image" (pure Rust SVG, default), "auto" (same as image), or "omml" (Word native)
     pub renderer: String,
     /// Font size for math rendering: "8pt", "9pt", "10pt", "11pt", or "12pt" (default: "10pt")
     pub font_size: String,
@@ -390,7 +396,7 @@ pub struct MathSection {
 impl Default for MathSection {
     fn default() -> Self {
         Self {
-            renderer: "rex".to_string(),
+            renderer: "image".to_string(),
             font_size: "10pt".to_string(),
             number_all: false,
         }
@@ -864,5 +870,30 @@ prefix = "Appendix"
         assert_eq!(config.fonts.normal_based_size, 14);
         assert_eq!(config.toc.enabled, true);
         assert_eq!(config.toc.depth, 2);
+    }
+
+    #[test]
+    fn test_mermaid_section_defaults() {
+        let mermaid = MermaidSection::default();
+        assert_eq!(mermaid.spacing_before, "120");
+        assert_eq!(mermaid.spacing_after, "120");
+        assert_eq!(mermaid.output_format, "png");
+        assert_eq!(mermaid.dpi, 150);
+    }
+
+    #[test]
+    #[cfg(feature = "cli")]
+    fn test_parse_mermaid_output_format() {
+        let toml = r##"
+[document]
+title = "Test"
+
+[mermaid]
+output_format = "svg"
+dpi = 300
+"##;
+        let config = ProjectConfig::parse_toml(toml).unwrap();
+        assert_eq!(config.mermaid.output_format, "svg");
+        assert_eq!(config.mermaid.dpi, 300);
     }
 }

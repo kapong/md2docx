@@ -440,6 +440,8 @@ impl ProjectBuilder {
                 let after = self.config.mermaid.spacing_after.parse::<u32>().unwrap_or(120);
                 (before, after)
             },
+            mermaid_output_format: self.config.mermaid.output_format.clone(),
+            mermaid_dpi: self.config.mermaid.dpi,
             math_renderer: self.config.math.renderer.clone(),
             math_font_size: self.config.math.font_size.clone(),
             math_number_all: self.config.math.number_all,

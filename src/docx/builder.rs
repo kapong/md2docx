@@ -4,7 +4,9 @@
 //! document structure, converting markdown elements to DOCX paragraphs
 //! and runs.
 
-use crate::docx::image_utils::{default_image_size_emu, read_image_dimensions};
+use crate::docx::image_utils::{
+    calculate_image_size_emu, default_image_size_emu, read_image_dimensions,
+};
 use crate::docx::ooxml::{
     DocElement, DocumentXml, FooterConfig, FooterXml, FootnotesXml, HeaderConfig, HeaderFooterRefs,
     HeaderXml, ImageElement, Paragraph, ParagraphChild, Run, Table, TableCellElement, TableRow,
@@ -432,7 +434,11 @@ pub struct DocumentConfig {
     pub embed_dir: Option<std::path::PathBuf>,
     /// Mermaid diagram spacing: (before, after) in twips
     pub mermaid_spacing: (u32, u32),
-    /// Math renderer mode: "rex" (default) or "omml"
+    /// Mermaid output format: "png" (default) or "svg"
+    pub mermaid_output_format: String,
+    /// Mermaid PNG rendering DPI (default: 150)
+    pub mermaid_dpi: u32,
+    /// Math renderer mode: "image" (default), "auto", "rex", or "omml"
     pub math_renderer: String,
     /// Font size for math rendering (e.g. "10pt", "12pt")
     pub math_font_size: String,
@@ -459,7 +465,9 @@ impl Default for DocumentConfig {
             embedded_fonts: Vec::new(),
             embed_dir: None,
             mermaid_spacing: (120, 120),
-            math_renderer: "rex".to_string(),
+            mermaid_output_format: "png".to_string(),
+            mermaid_dpi: 150,
+            math_renderer: "image".to_string(),
             math_font_size: "10pt".to_string(),
             math_number_all: false,
         }
@@ -584,7 +592,11 @@ pub(crate) fn build_document(
             .position(|b| matches!(b, Block::ThematicBreak))
     };
 
-    let resolved_math_renderer = config.math_renderer.clone();
+    // Normalize renderer: "image" and "auto" both resolve to "rex" (pure-Rust ReX engine)
+    let resolved_math_renderer = match config.math_renderer.as_str() {
+        "image" | "auto" | "rex" => "rex".to_string(),
+        other => other.to_string(), // "omml" or any unknown value
+    };
 
     // Process all blocks in the document
     // Track the last list seen to support resuming lists across code blocks
@@ -612,6 +624,8 @@ pub(crate) fn build_document(
             code_size: config.fonts.as_ref().and_then(|f| f.code_size),
             quote_level: 0,
             mermaid_spacing: config.mermaid_spacing,
+            mermaid_output_format: config.mermaid_output_format.clone(),
+            mermaid_dpi: config.mermaid_dpi,
             math_renderer: resolved_math_renderer.clone(),
             math_font_size: config.math_font_size.clone(),
             math_number_all: config.math_number_all,
@@ -967,6 +981,8 @@ pub(crate) struct BuildContextParams<'a> {
     pub code_size: Option<u32>,
     pub quote_level: usize,
     pub mermaid_spacing: (u32, u32),
+    pub mermaid_output_format: String,
+    pub mermaid_dpi: u32,
     pub math_renderer: String,
     pub math_font_size: String,
     pub math_number_all: bool,
@@ -995,6 +1011,8 @@ pub(crate) struct BuildContext<'a> {
     pub code_size: Option<u32>,
     pub quote_level: usize,
     pub mermaid_spacing: (u32, u32),
+    pub mermaid_output_format: String,
+    pub mermaid_dpi: u32,
     pub math_renderer: String,
     pub math_font_size: String,
     pub math_number_all: bool,
@@ -1023,6 +1041,8 @@ impl<'a> BuildContext<'a> {
             code_size: params.code_size,
             quote_level: params.quote_level,
             mermaid_spacing: params.mermaid_spacing,
+            mermaid_output_format: params.mermaid_output_format,
+            mermaid_dpi: params.mermaid_dpi,
             math_renderer: params.math_renderer,
             math_font_size: params.math_font_size,
             math_number_all: params.math_number_all,
@@ -1211,32 +1231,64 @@ fn block_to_elements(
         }
 
         Block::Mermaid { content, id } => {
-            match crate::mermaid::render_to_svg(content) {
-                Ok(svg_data) => {
+            // Render as PNG (default) or SVG based on configuration
+            // mermaid-rs-renderer v0.2.0 supports all 23 diagram types natively
+            let use_png = ctx.mermaid_output_format == "png";
+            let scale = ctx.mermaid_dpi as f32 / 75.0;
+
+            let render_result: Result<(Vec<u8>, bool), crate::error::Error> = if use_png {
+                // Try PNG first, fall back to SVG if mermaid-png feature is disabled
+                crate::mermaid::render_to_png(content, scale)
+                    .map(|data| (data, true))
+                    .or_else(|_png_err| {
+                        eprintln!("Warning: PNG rendering failed, falling back to SVG");
+                        crate::mermaid::render_to_svg(content)
+                            .map(|svg| (svg.into_bytes(), false))
+                    })
+            } else {
+                crate::mermaid::render_to_svg(content)
+                    .map(|svg| (svg.into_bytes(), false))
+            };
+
+            match render_result {
+                Ok((image_data, is_png)) => {
                     // Register figure anchor if id is present
                     if let Some(fig_id) = id {
                         ctx.xref_ctx.register_figure(fig_id, "Mermaid Diagram");
                     }
 
-                    let image_id = ctx.rel_manager.next_image_id();
-                    // Generate a virtual filename
-                    let filename = format!("mermaid{}.svg", image_id);
+                    // Calculate correct EMU dimensions before consuming image data
+                    let (width_emu, height_emu) = {
+                        let dims = read_image_dimensions(&image_data)
+                            .unwrap_or(crate::docx::image_utils::ImageDimensions {
+                                width: 576,
+                                height: 384,
+                            });
+                        if is_png {
+                            // PNG rendered at configured DPI; use that DPI for physical sizing
+                            calculate_image_size_emu(dims, ctx.mermaid_dpi as f64, 6.0, 9.0)
+                        } else {
+                            // SVG uses default 96 DPI sizing
+                            default_image_size_emu(dims)
+                        }
+                    };
 
-                    // Add to image context as SVG
+                    let image_id = ctx.rel_manager.next_image_id();
+                    let ext = if is_png { "png" } else { "svg" };
+                    let filename = format!("mermaid{}.{}", image_id, ext);
+
                     let rel_id = ctx.image_ctx.add_image_data(
                         &filename,
-                        svg_data.into_bytes(),
-                        None, // No explicit width, let it use natural size
+                        image_data,
+                        None,
                         ctx.rel_manager,
                     );
 
-                    // Get dimensions from the SVG data
-                    let (width_emu, height_emu) = ctx
-                        .image_ctx
-                        .images
-                        .last()
-                        .map(|img| (img.width_emu, img.height_emu))
-                        .unwrap_or((6 * 914400, 4 * 914400));
+                    // Update stored dimensions with DPI-correct values
+                    if let Some(img_info) = ctx.image_ctx.images.last_mut() {
+                        img_info.width_emu = width_emu;
+                        img_info.height_emu = height_emu;
+                    }
 
                     let mut img = ImageElement::new(&rel_id, width_emu, height_emu)
                         .alt_text("Mermaid Diagram")
@@ -2537,6 +2589,8 @@ fn inline_to_children(
                         code_size: ctx.code_size,
                         quote_level: 0,
                         mermaid_spacing: ctx.mermaid_spacing,
+                        mermaid_output_format: ctx.mermaid_output_format.clone(),
+                        mermaid_dpi: ctx.mermaid_dpi,
                         math_renderer: ctx.math_renderer.clone(),
                         math_font_size: ctx.math_font_size.clone(),
                         math_number_all: ctx.math_number_all,
@@ -5061,7 +5115,7 @@ End of document.
     #[test]
     fn test_math_renderer_default_config() {
         let config = DocumentConfig::default();
-        assert_eq!(config.math_renderer, "rex");
+        assert_eq!(config.math_renderer, "image");
     }
 
     #[test]
@@ -5138,5 +5192,29 @@ End of document.
             p.children.iter().any(|c| matches!(c, ParagraphChild::OfficeMath(_)))
         });
         assert!(has_math, "Should produce OfficeMath children when renderer is omml");
+    }
+
+    #[test]
+    fn test_document_config_mermaid_defaults() {
+        let config = DocumentConfig::default();
+        assert_eq!(config.mermaid_output_format, "png");
+        assert_eq!(config.mermaid_dpi, 150);
+        assert_eq!(config.mermaid_spacing, (120, 120));
+    }
+
+    #[test]
+    fn test_mermaid_png_emu_calculation() {
+        use crate::docx::image_utils::{calculate_image_size_emu, ImageDimensions};
+
+        // At 150 DPI, 750 pixels = 5 inches = 4572000 EMU
+        let dims = ImageDimensions {
+            width: 750,
+            height: 450,
+        };
+        let (w, h) = calculate_image_size_emu(dims, 150.0, 6.0, 9.0);
+        // 750px / 150dpi = 5 inches = 5 * 914400 = 4572000 EMU
+        assert_eq!(w, 4572000);
+        // 450px / 150dpi = 3 inches = 3 * 914400 = 2743200 EMU
+        assert_eq!(h, 2743200);
     }
 }
